@@ -370,10 +370,22 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 <div className="rounded-xl border border-border bg-card overflow-hidden animate-fade-in">
                   <div className="px-6 py-4 border-b border-border flex items-center justify-between">
                     <span className="text-sm font-semibold text-foreground">Группы вашего WhatsApp</span>
-                    <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 gap-1" onClick={fetchWaGroups}>
-                      <Icon name="RefreshCw" size={12} />
-                      Обновить
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      {importedGroups.length > 0 && (
+                        <button
+                          onClick={() => selectedWaGroups.length === importedGroups.length
+                            ? setSelectedWaGroups([])
+                            : setSelectedWaGroups(importedGroups.map((g) => g.id))}
+                          className="text-xs text-primary hover:underline"
+                        >
+                          {selectedWaGroups.length === importedGroups.length ? "Снять всё" : "Отметить всё"}
+                        </button>
+                      )}
+                      <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 gap-1" onClick={fetchWaGroups}>
+                        <Icon name="RefreshCw" size={12} />
+                        Обновить
+                      </Button>
+                    </div>
                   </div>
 
                   {loadingGroups ? (
@@ -696,7 +708,24 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
               </div>
 
               <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                <div className="text-sm font-semibold text-foreground">Выберите группы получателей</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-foreground">Выберите группы получателей</div>
+                  {groups.filter((g) => g.active).length > 0 && (
+                    <button
+                      onClick={() => {
+                        const activeIds = groups.filter((g) => g.active).map((g) => g.id);
+                        if (selectedGroups.length === activeIds.length) {
+                          setSelectedGroups([]);
+                        } else {
+                          setSelectedGroups(activeIds);
+                        }
+                      }}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      {selectedGroups.length === groups.filter((g) => g.active).length ? "Снять всё" : "Отметить всё"}
+                    </button>
+                  )}
+                </div>
                 {groups.length === 0 ? (
                   <div className="text-sm text-muted-foreground py-4 text-center">
                     Нет групп. <button onClick={() => setTab("connect")} className="text-primary hover:underline">Подключите WhatsApp</button> и импортируйте группы.
