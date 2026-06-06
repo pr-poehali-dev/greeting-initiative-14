@@ -40,6 +40,26 @@ def handler(event: dict, context) -> dict:
     db = get_db()
     cur = db.cursor()
 
+    if action == "create_user":
+        secret = body.get("secret", "")
+        if secret != os.environ.get("ADMIN_SECRET", ""):
+            return json_response({"error": "Forbidden"}, 403)
+        email = body.get("email", "").strip().lower()
+        password = body.get("password", "")
+        if not email or not password:
+            return json_response({"error": "email и password обязательны"}, 400)
+        pw_hash = hash_password(password)
+        try:
+            cur.execute(f"INSERT INTO {SCHEMA}.users (email, password_hash) VALUES (%s, %s) RETURNING id", (email, pw_hash))
+            user_id = cur.fetchone()[0]
+            db.commit()
+            return json_response({"ok": True, "user_id": user_id, "email": email})
+        except Exception as e:
+            db.rollback()
+            if "unique" in str(e).lower():
+                return json_response({"error": "Email уже существует"}, 400)
+            return json_response({"error": str(e)}, 500)
+
     if action == "login":
         email = body.get("email", "").strip().lower()
         password = body.get("password", "")
