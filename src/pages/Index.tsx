@@ -205,10 +205,6 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       clearTimeout(timeout);
       const data = await res.json();
       setSendResult({ sent: data.sent ?? 0, failed: data.failed ?? 0, total: data.total ?? targetGroups.length });
-      if ((data.sent ?? 0) > 0) {
-        setBroadcastText("");
-        setSelectedGroups([]);
-      }
     } catch (e: unknown) {
       if (e instanceof Error && e.name === "AbortError") {
         setSendResult({ sent: 0, failed: targetGroups.length, total: targetGroups.length });
@@ -753,21 +749,6 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 </div>
 
                 <div className="flex flex-col gap-3 pt-10">
-                  {sendResult && (
-                    <div className={`rounded-lg border px-3 py-2 text-xs flex items-center gap-2 ${
-                      sendResult.failed === 0
-                        ? "border-primary/30 bg-primary/10 text-primary"
-                        : sendResult.sent === 0
-                        ? "border-red-500/30 bg-red-500/10 text-red-400"
-                        : "border-amber-500/30 bg-amber-500/10 text-amber-400"
-                    }`}>
-                      <Icon name={sendResult.failed === 0 ? "CheckCircle" : "AlertTriangle"} size={13} />
-                      <span>
-                        <b>{sendResult.sent}</b>/<b>{sendResult.total}</b>
-                        {sendResult.failed > 0 && ` (ошибок: ${sendResult.failed})`}
-                      </span>
-                    </div>
-                  )}
                   <Button
                     onClick={sendBroadcast}
                     disabled={!broadcastText.trim() || selectedGroups.length === 0 || waStatus !== "connected" || sending}
@@ -778,6 +759,36 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                   </Button>
                 </div>
               </div>
+
+              {/* Результат рассылки */}
+              {sendResult && (
+                <div className={`rounded-xl border p-5 flex items-center gap-4 animate-fade-in ${
+                  sendResult.failed === 0
+                    ? "border-primary/40 bg-primary/10"
+                    : sendResult.sent === 0
+                    ? "border-red-500/40 bg-red-500/10"
+                    : "border-amber-500/40 bg-amber-500/10"
+                }`}>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                    sendResult.failed === 0 ? "bg-primary/20" : sendResult.sent === 0 ? "bg-red-500/20" : "bg-amber-500/20"
+                  }`}>
+                    <Icon name={sendResult.failed === 0 ? "CheckCircle" : "AlertTriangle"} size={20}
+                      className={sendResult.failed === 0 ? "text-primary" : sendResult.sent === 0 ? "text-red-400" : "text-amber-400"} />
+                  </div>
+                  <div className="flex-1">
+                    <div className={`text-sm font-semibold ${sendResult.failed === 0 ? "text-primary" : sendResult.sent === 0 ? "text-red-400" : "text-amber-400"}`}>
+                      {sendResult.failed === 0 ? "Рассылка выполнена успешно!" : sendResult.sent === 0 ? "Ошибка отправки" : "Частичная отправка"}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Отправлено: <b className="text-foreground">{sendResult.sent}</b> из <b className="text-foreground">{sendResult.total}</b> групп
+                      {sendResult.failed > 0 && <span className="text-red-400 ml-2">· Ошибок: {sendResult.failed}</span>}
+                    </div>
+                  </div>
+                  <button onClick={() => setSendResult(null)} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors">
+                    <Icon name="X" size={14} />
+                  </button>
+                </div>
+              )}
 
               <div className="rounded-xl border border-border bg-card p-6 space-y-4">
                 <div className="flex items-center justify-between">
