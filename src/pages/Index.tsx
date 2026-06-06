@@ -163,6 +163,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setSending(true);
     setSendResult(null);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000);
       const res = await fetch(SEND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
@@ -170,15 +172,21 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
           text: broadcastText,
           group_ids: targetGroups.map((g) => g.waId),
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       const data = await res.json();
-      setSendResult({ sent: data.sent, failed: data.failed, total: data.total });
-      if (data.sent > 0) {
+      setSendResult({ sent: data.sent ?? 0, failed: data.failed ?? 0, total: data.total ?? targetGroups.length });
+      if ((data.sent ?? 0) > 0) {
         setBroadcastText("");
         setSelectedGroups([]);
       }
-    } catch {
-      setSendResult({ sent: 0, failed: targetGroups.length, total: targetGroups.length });
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === "AbortError") {
+        setSendResult({ sent: 0, failed: targetGroups.length, total: targetGroups.length });
+      } else {
+        setSendResult({ sent: 0, failed: targetGroups.length, total: targetGroups.length });
+      }
     } finally {
       setSending(false);
     }

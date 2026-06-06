@@ -28,21 +28,21 @@ def send_message(token: str, group_id: str, text: str) -> dict:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode())
             print(f"[send] OK group={group_id} msg_id={data.get('message', {}).get('id', '?')}")
             return {"ok": True, "group_id": group_id}
     except urllib.error.HTTPError as e:
         body = e.read().decode()
         print(f"[send] HTTP {e.code} group={group_id}: {body[:200]}")
-        return {"ok": False, "group_id": group_id, "error": f"HTTP {e.code}: {body[:100]}"}
+        return {"ok": False, "group_id": group_id, "error": f"HTTP {e.code}"}
     except Exception as ex:
         print(f"[send] Exception group={group_id}: {ex}")
         return {"ok": False, "group_id": group_id, "error": str(ex)}
 
 
 def handler(event: dict, context) -> dict:
-    """Отправка текстового сообщения в выбранные группы WhatsApp через Whapi."""
+    """Отправка текстового сообщения в выбранные группы WhatsApp через Whapi. Пакетная отправка по 10 групп."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors, "body": ""}
 
@@ -78,11 +78,12 @@ def handler(event: dict, context) -> dict:
         }
 
     results = []
-    for group_id in group_ids:
+    for i, group_id in enumerate(group_ids):
         result = send_message(token, group_id, text)
         results.append(result)
-        if len(group_ids) > 1:
-            time.sleep(1.5)
+        # Небольшая пауза только между группами, не после последней
+        if i < len(group_ids) - 1:
+            time.sleep(0.5)
 
     sent = sum(1 for r in results if r["ok"])
     failed = len(results) - sent
