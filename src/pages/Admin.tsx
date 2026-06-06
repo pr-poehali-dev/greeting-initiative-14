@@ -1,0 +1,169 @@
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import Icon from "@/components/ui/icon";
+
+const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338b69b";
+
+export default function Admin() {
+  const [adminSecret, setAdminSecret] = useState("");
+  const [authed, setAuthed] = useState(false);
+  const [secretError, setSecretError] = useState("");
+
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const [users, setUsers] = useState<{ id: number; email: string }[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
+  async function checkSecret() {
+    if (!adminSecret.trim()) { setSecretError("Введите секретный ключ"); return; }
+    setLoadingUsers(true);
+    setSecretError("");
+    const res = await fetch(`${AUTH_URL}?action=list_users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret: adminSecret }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      setSecretError("Неверный ключ");
+      setLoadingUsers(false);
+      return;
+    }
+    setUsers(data.users || []);
+    setAuthed(true);
+    setLoadingUsers(false);
+  }
+
+  async function createUser() {
+    if (!login.trim() || !password.trim()) {
+      setResult({ ok: false, message: "Заполните логин и пароль" });
+      return;
+    }
+    setLoading(true);
+    setResult(null);
+    const res = await fetch(`${AUTH_URL}?action=create_user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: login.trim(), password, secret: adminSecret }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      setResult({ ok: false, message: data.error });
+    } else {
+      setResult({ ok: true, message: `Пользователь «${login}» создан` });
+      setUsers((prev) => [...prev, { id: data.user_id, email: data.email }]);
+      setLogin("");
+      setPassword("");
+    }
+    setLoading(false);
+  }
+
+  if (!authed) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="w-full max-w-sm">
+          <div className="flex items-center gap-3 mb-8 justify-center">
+            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+              <Icon name="ShieldCheck" size={20} className="text-white" />
+            </div>
+            <div>
+              <div className="text-lg font-bold text-foreground">Администратор</div>
+              <div className="text-xs text-muted-foreground">Управление пользователями</div>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+            <p className="text-sm text-muted-foreground text-center">Введите секретный ключ администратора</p>
+            <Input
+              type="password"
+              placeholder="Секретный ключ"
+              value={adminSecret}
+              onChange={(e) => setAdminSecret(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && checkSecret()}
+            />
+            {secretError && (
+              <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                {secretError}
+              </div>
+            )}
+            <Button className="w-full" onClick={checkSecret} disabled={loadingUsers}>
+              {loadingUsers ? "Проверка..." : "Войти"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background p-8">
+      <div className="max-w-lg mx-auto space-y-6">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
+            <Icon name="ShieldCheck" size={18} className="text-white" />
+          </div>
+          <div>
+            <div className="text-base font-bold text-foreground">Управление пользователями</div>
+            <div className="text-xs text-muted-foreground">Создание аккаунтов для доступа к приложению</div>
+          </div>
+        </div>
+
+        {/* Создать пользователя */}
+        <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+          <div className="text-sm font-semibold text-foreground">Новый пользователь</div>
+          <div className="space-y-3">
+            <Input
+              placeholder="Логин (например: ivanov)"
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
+            />
+            <Input
+              type="password"
+              placeholder="Пароль"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createUser()}
+            />
+          </div>
+
+          {result && (
+            <div className={`text-xs rounded-lg px-3 py-2 border ${result.ok
+              ? "text-primary bg-primary/10 border-primary/20"
+              : "text-red-400 bg-red-500/10 border-red-500/20"}`}>
+              {result.message}
+            </div>
+          )}
+
+          <Button className="w-full gap-2" onClick={createUser} disabled={loading}>
+            <Icon name="UserPlus" size={14} />
+            {loading ? "Создаю..." : "Создать пользователя"}
+          </Button>
+        </div>
+
+        {/* Список пользователей */}
+        <div className="bg-card border border-border rounded-2xl p-6 space-y-3">
+          <div className="text-sm font-semibold text-foreground">Все пользователи ({users.length})</div>
+          {users.length === 0 ? (
+            <div className="text-xs text-muted-foreground py-2">Нет пользователей</div>
+          ) : (
+            <div className="space-y-2">
+              {users.map((u) => (
+                <div key={u.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-secondary/40">
+                  <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                    <Icon name="User" size={13} className="text-primary" />
+                  </div>
+                  <div className="text-sm text-foreground">{u.email}</div>
+                  <div className="ml-auto text-xs text-muted-foreground">#{u.id}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

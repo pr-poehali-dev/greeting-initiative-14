@@ -40,6 +40,14 @@ def handler(event: dict, context) -> dict:
     db = get_db()
     cur = db.cursor()
 
+    if action == "list_users":
+        secret = body.get("secret", "")
+        if secret != os.environ.get("ADMIN_SECRET", ""):
+            return json_response({"error": "Forbidden"}, 403)
+        cur.execute(f"SELECT id, email FROM {SCHEMA}.users ORDER BY id")
+        rows = cur.fetchall()
+        return json_response({"users": [{"id": r[0], "email": r[1]} for r in rows]})
+
     if action == "create_user":
         secret = body.get("secret", "")
         if secret != os.environ.get("ADMIN_SECRET", ""):
