@@ -192,7 +192,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setSendResult(null);
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120000);
+      const timeout = setTimeout(() => controller.abort(), 300000);
       const res = await fetch(SEND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },

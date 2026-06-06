@@ -91,7 +91,7 @@ def handler(event: dict, context) -> dict:
         result = send_message(instance_id, token, group_id, text)
         results.append(result)
         if i < len(group_ids) - 1:
-            time.sleep(1)
+            time.sleep(2.5)
 
     sent = sum(1 for r in results if r["ok"])
     failed = len(results) - sent
