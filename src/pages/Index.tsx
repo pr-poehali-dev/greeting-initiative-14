@@ -61,6 +61,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [broadcastText, setBroadcastText] = useState("");
   const [selectedGroups, setSelectedGroups] = useState<number[]>([]);
   const [sending, setSending] = useState(false);
+  const [sendProgress, setSendProgress] = useState<{ done: number; total: number } | null>(null);
   const [sendResult, setSendResult] = useState<{ sent: number; failed: number; total: number } | null>(null);
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
@@ -190,30 +191,37 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     if (!broadcastText.trim() || targetGroups.length === 0) return;
     setSending(true);
     setSendResult(null);
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 300000);
-      const res = await fetch(SEND_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
-        body: JSON.stringify({
-          text: broadcastText,
-          group_ids: targetGroups.map((g) => g.waId),
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      const data = await res.json();
-      setSendResult({ sent: data.sent ?? 0, failed: data.failed ?? 0, total: data.total ?? targetGroups.length });
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name === "AbortError") {
-        setSendResult({ sent: 0, failed: targetGroups.length, total: targetGroups.length });
-      } else {
-        setSendResult({ sent: 0, failed: targetGroups.length, total: targetGroups.length });
+    setSendProgress({ done: 0, total: targetGroups.length });
+
+    const BATCH = 10;
+    const allIds = targetGroups.map((g) => g.waId!);
+    let totalSent = 0;
+    let totalFailed = 0;
+
+    for (let i = 0; i < allIds.length; i += BATCH) {
+      const batch = allIds.slice(i, i + BATCH);
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 120000);
+        const res = await fetch(SEND_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+          body: JSON.stringify({ text: broadcastText, group_ids: batch }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        const data = await res.json();
+        totalSent += data.sent ?? 0;
+        totalFailed += data.failed ?? 0;
+      } catch {
+        totalFailed += batch.length;
       }
-    } finally {
-      setSending(false);
+      setSendProgress({ done: Math.min(i + BATCH, allIds.length), total: allIds.length });
     }
+
+    setSendResult({ sent: totalSent, failed: totalFailed, total: allIds.length });
+    setSendProgress(null);
+    setSending(false);
   }
 
   function importSelectedGroups() {
@@ -757,6 +765,20 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                     <Icon name={sending ? "Loader" : "Send"} size={15} className={sending ? "animate-spin" : ""} />
                     {sending ? "Отправляю..." : "Отправить"}
                   </Button>
+                  {sendProgress && (
+                    <div className="space-y-1.5 min-w-[140px]">
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Прогресс</span>
+                        <span>{sendProgress.done} / {sendProgress.total}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-secondary overflow-hidden">
+                        <div
+                          className="h-full bg-primary rounded-full transition-all duration-500"
+                          style={{ width: `${Math.round((sendProgress.done / sendProgress.total) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
