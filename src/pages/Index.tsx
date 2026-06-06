@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 
 const WHAPI_URL = "https://functions.poehali.dev/f6a3c6b6-03f7-4150-b586-7cf660c83ced";
 const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338b69b";
+const SEND_URL = "https://functions.poehali.dev/3c368aad-a7c2-4a91-9095-ac1a47fe77c9";
 
 type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect";
 type WaStatus = "disconnected" | "loading" | "qr" | "connected";
@@ -59,6 +60,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [broadcastText, setBroadcastText] = useState("");
   const [selectedGroups, setSelectedGroups] = useState<number[]>([]);
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState<{ sent: number; failed: number; total: number } | null>(null);
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupTag, setNewGroupTag] = useState("Клиенты");
@@ -151,6 +154,33 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       setImportedGroups([]);
     } finally {
       setLoadingGroups(false);
+    }
+  }
+
+  async function sendBroadcast() {
+    const targetGroups = groups.filter((g) => selectedGroups.includes(g.id) && g.waId);
+    if (!broadcastText.trim() || targetGroups.length === 0) return;
+    setSending(true);
+    setSendResult(null);
+    try {
+      const res = await fetch(SEND_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+        body: JSON.stringify({
+          text: broadcastText,
+          group_ids: targetGroups.map((g) => g.waId),
+        }),
+      });
+      const data = await res.json();
+      setSendResult({ sent: data.sent, failed: data.failed, total: data.total });
+      if (data.sent > 0) {
+        setBroadcastText("");
+        setSelectedGroups([]);
+      }
+    } catch {
+      setSendResult({ sent: 0, failed: targetGroups.length, total: targetGroups.length });
+    } finally {
+      setSending(false);
     }
   }
 
@@ -694,12 +724,29 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 )}
               </div>
 
+              {sendResult && (
+                <div className={`rounded-lg border px-4 py-3 text-sm flex items-center gap-3 ${
+                  sendResult.failed === 0
+                    ? "border-primary/30 bg-primary/10 text-primary"
+                    : sendResult.sent === 0
+                    ? "border-red-500/30 bg-red-500/10 text-red-400"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                }`}>
+                  <Icon name={sendResult.failed === 0 ? "CheckCircle" : "AlertTriangle"} size={15} />
+                  <span>
+                    Отправлено: <b>{sendResult.sent}</b> из <b>{sendResult.total}</b> групп
+                    {sendResult.failed > 0 && ` · Ошибок: ${sendResult.failed}`}
+                  </span>
+                </div>
+              )}
+
               <Button
-                disabled={!broadcastText.trim() || selectedGroups.length === 0 || waStatus !== "connected"}
+                onClick={sendBroadcast}
+                disabled={!broadcastText.trim() || selectedGroups.length === 0 || waStatus !== "connected" || sending}
                 className="w-full bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11 text-sm font-semibold disabled:opacity-40"
               >
-                <Icon name="Send" size={15} />
-                Отправить рассылку
+                <Icon name={sending ? "Loader" : "Send"} size={15} className={sending ? "animate-spin" : ""} />
+                {sending ? "Отправляю..." : "Отправить рассылку"}
               </Button>
             </div>
           )}
