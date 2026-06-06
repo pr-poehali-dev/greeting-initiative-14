@@ -1,0 +1,13 @@
+{
+  "tests": [
+    {
+      "name": "Регистрация пользователя",
+      "method": "POST",
+      "path": "/?action=register",
+      "body": {"email": "test@test.com", "password": "test123"},
+      "expectedStatus": 200,
+      "expectedBody": {"session_id": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
