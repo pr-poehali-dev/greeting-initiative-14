@@ -167,7 +167,18 @@ export default function Admin() {
           <div className="text-sm font-semibold text-foreground">Новый пользователь</div>
           <div className="space-y-3">
             <Input placeholder="Логин" value={login} onChange={(e) => setLogin(e.target.value)} />
-            <PasswordInput placeholder="Пароль" value={password} onChange={setPassword} onKeyDown={(e) => e.key === "Enter" && createUser()} />
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <PasswordInput placeholder="Пароль" value={password} onChange={setPassword} onKeyDown={(e) => e.key === "Enter" && createUser()} />
+              </div>
+              <Button type="button" variant="outline" className="shrink-0 gap-1.5 text-xs" onClick={() => {
+                const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$";
+                setPassword(Array.from({length: 12}, () => chars[Math.floor(Math.random() * chars.length)]).join(""));
+              }}>
+                <Icon name="Shuffle" size={13} />
+                Сгенерировать
+              </Button>
+            </div>
             <Input placeholder="ID инстанса (напр. 1234567890)" value={newInstanceId}
               onChange={(e) => setNewInstanceId(e.target.value)} className="font-mono text-xs" />
             <Input placeholder="Токен инстанса (можно добавить позже)" value={newInstanceToken}
