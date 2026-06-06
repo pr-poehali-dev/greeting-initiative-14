@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 
-const WHAPI_URL = "https://functions.poehali.dev/f6a3c6b6-03f7-4150-b586-7cf660c83ced";
+const GREENAPI_URL = "https://functions.poehali.dev/2be7b0f6-d7f9-474a-b21e-d4a74f848153";
 const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338b69b";
 const SEND_URL = "https://functions.poehali.dev/3c368aad-a7c2-4a91-9095-ac1a47fe77c9";
 
@@ -85,17 +85,16 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
 
   const totalMembers = groups.filter((g) => g.active).reduce((s, g) => s + g.members, 0);
 
-  const whapiHeaders = { "X-Session-Id": sessionId };
+  const apiHeaders = { "X-Session-Id": sessionId };
 
   // Polling for QR / connection status
   useEffect(() => {
     if (waStatus === "qr") {
       pollRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`${WHAPI_URL}?action=status`, { headers: whapiHeaders });
+          const res = await fetch(`${GREENAPI_URL}?action=status`, { headers: apiHeaders });
           const data = await res.json();
-          const st = (data.raw?.status || data.status || "").toLowerCase();
-          if (st === "authenticated" || st === "active" || st === "connected") {
+          if (data.connected || data.status === "authorized") {
             clearInterval(pollRef.current!);
             setWaStatus("connected");
             setBotActive(true);
@@ -113,30 +112,25 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setQrError(null);
     setQrImage(null);
     try {
-      const res = await fetch(`${WHAPI_URL}?action=qr`, { headers: whapiHeaders });
+      const res = await fetch(`${GREENAPI_URL}?action=qr`, { headers: apiHeaders });
       const data = await res.json();
-      const qr = data.qr_code;
-      // Уже авторизован — QR не нужен
+      if (data.error === "no_instance") {
+        setQrError("Инстанс не назначен. Обратитесь к администратору.");
+        setWaStatus("disconnected");
+        return;
+      }
       if (data.already_connected) {
         setWaStatus("connected");
         setBotActive(true);
         fetchWaGroups();
         return;
       }
-      if (qr) {
-        setQrImage(qr.startsWith("data:") ? qr : `data:${data.mime_type || "image/png"};base64,${qr}`);
+      if (data.qr_code) {
+        setQrImage(data.qr_code);
         setWaStatus("qr");
       } else {
-        // Дополнительная проверка статуса в raw
-        const st = (data.raw?.status || data.raw?.accountStatus || "").toLowerCase();
-        if (["authenticated", "active", "connected", "ok"].includes(st)) {
-          setWaStatus("connected");
-          setBotActive(true);
-          fetchWaGroups();
-        } else {
-          setQrError(`QR-код недоступен. Ответ сервера: ${st || "нет данных"}. Проверьте токен Whapi.`);
-          setWaStatus("disconnected");
-        }
+        setQrError(data.error || "Не удалось получить QR-код. Попробуйте ещё раз.");
+        setWaStatus("disconnected");
       }
     } catch {
       setQrError("Ошибка соединения с сервером. Попробуйте ещё раз.");
@@ -144,10 +138,20 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     }
   }
 
+  async function disconnectWa() {
+    try {
+      await fetch(`${GREENAPI_URL}?action=logout`, { headers: apiHeaders });
+    } catch { /* ignore */ }
+    setWaStatus("disconnected");
+    setBotActive(false);
+    setQrImage(null);
+    setImportedGroups([]);
+  }
+
   async function fetchWaGroups() {
     setLoadingGroups(true);
     try {
-      const res = await fetch(`${WHAPI_URL}?action=groups`, { headers: whapiHeaders });
+      const res = await fetch(`${GREENAPI_URL}?action=groups`, { headers: apiHeaders });
       const data = await res.json();
       setImportedGroups(data.groups || []);
     } catch {
@@ -327,7 +331,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                   <div className="text-xs text-muted-foreground mt-1">
                     {waStatus === "connected" ? "Аккаунт авторизован, можно отправлять рассылки" :
                      waStatus === "qr" ? "Откройте WhatsApp → Связанные устройства → Привязать устройство" :
-                     waStatus === "loading" ? "Запрашиваем QR-код у Whapi..." :
+                     waStatus === "loading" ? "Запрашиваем QR-код..." :
                      "Нажмите кнопку ниже, чтобы получить QR-код для авторизации"}
                   </div>
                 </div>
@@ -370,6 +374,14 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 <Button disabled className="w-full h-11 gap-2 opacity-60">
                   <Icon name="Loader" size={16} className="animate-spin" />
                   Загружаем QR-код...
+                </Button>
+              )}
+
+              {/* Сменить аккаунт */}
+              {waStatus === "connected" && (
+                <Button variant="outline" onClick={disconnectWa} className="w-full h-11 gap-2 border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300">
+                  <Icon name="RefreshCw" size={16} />
+                  Сменить аккаунт WhatsApp
                 </Button>
               )}
 

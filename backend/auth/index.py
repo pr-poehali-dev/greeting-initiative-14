@@ -44,9 +44,9 @@ def handler(event: dict, context) -> dict:
         secret = body.get("secret", "")
         if secret != os.environ.get("ADMIN_SECRET", ""):
             return json_response({"error": "Forbidden"}, 403)
-        cur.execute(f"SELECT id, email, whapi_token FROM {SCHEMA}.users ORDER BY id")
+        cur.execute(f"SELECT id, email, green_api_instance_id, green_api_token FROM {SCHEMA}.users ORDER BY id")
         rows = cur.fetchall()
-        return json_response({"users": [{"id": r[0], "email": r[1], "whapi_token": r[2] or ""} for r in rows]})
+        return json_response({"users": [{"id": r[0], "email": r[1], "instance_id": r[2] or "", "instance_token": r[3] or ""} for r in rows]})
 
     if action == "create_user":
         secret = body.get("secret", "")
@@ -54,12 +54,16 @@ def handler(event: dict, context) -> dict:
             return json_response({"error": "Forbidden"}, 403)
         email = body.get("email", "").strip().lower()
         password = body.get("password", "")
-        whapi_token = body.get("whapi_token", "").strip()
+        instance_id = body.get("instance_id", "").strip()
+        instance_token = body.get("instance_token", "").strip()
         if not email or not password:
             return json_response({"error": "email и password обязательны"}, 400)
         pw_hash = hash_password(password)
         try:
-            cur.execute(f"INSERT INTO {SCHEMA}.users (email, password_hash, whapi_token) VALUES (%s, %s, %s) RETURNING id", (email, pw_hash, whapi_token))
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.users (email, password_hash, green_api_instance_id, green_api_token) VALUES (%s, %s, %s, %s) RETURNING id",
+                (email, pw_hash, instance_id, instance_token)
+            )
             user_id = cur.fetchone()[0]
             db.commit()
             return json_response({"ok": True, "user_id": user_id, "email": email})
@@ -69,15 +73,16 @@ def handler(event: dict, context) -> dict:
                 return json_response({"error": "Логин уже существует"}, 400)
             return json_response({"error": str(e)}, 500)
 
-    if action == "set_token":
+    if action == "set_instance":
         secret = body.get("secret", "")
         if secret != os.environ.get("ADMIN_SECRET", ""):
             return json_response({"error": "Forbidden"}, 403)
         user_id = body.get("user_id")
-        whapi_token = body.get("whapi_token", "").strip()
+        instance_id = body.get("instance_id", "").strip()
+        instance_token = body.get("instance_token", "").strip()
         if not user_id:
             return json_response({"error": "user_id обязателен"}, 400)
-        cur.execute(f"UPDATE {SCHEMA}.users SET whapi_token=%s WHERE id=%s", (whapi_token, user_id))
+        cur.execute(f"UPDATE {SCHEMA}.users SET green_api_instance_id=%s, green_api_token=%s WHERE id=%s", (instance_id, instance_token, user_id))
         db.commit()
         return json_response({"ok": True})
 
@@ -111,28 +116,28 @@ def handler(event: dict, context) -> dict:
         email = body.get("email", "").strip().lower()
         password = body.get("password", "")
         pw_hash = hash_password(password)
-        cur.execute(f"SELECT id, email, whapi_token FROM {SCHEMA}.users WHERE email=%s AND password_hash=%s", (email, pw_hash))
+        cur.execute(f"SELECT id, email, green_api_instance_id, green_api_token FROM {SCHEMA}.users WHERE email=%s AND password_hash=%s", (email, pw_hash))
         row = cur.fetchone()
         if not row:
             return json_response({"error": "Неверный логин или пароль"}, 401)
-        user_id, email, whapi_token = row
+        user_id, email, instance_id, instance_token = row
         sid = secrets.token_hex(32)
         cur.execute(f"INSERT INTO {SCHEMA}.sessions (id, user_id) VALUES (%s, %s)", (sid, user_id))
         db.commit()
-        return json_response({"session_id": sid, "user_id": user_id, "email": email, "has_token": bool(whapi_token)})
+        return json_response({"session_id": sid, "user_id": user_id, "email": email, "has_instance": bool(instance_id and instance_token)})
 
     if action == "me":
         if not session_id:
             return json_response({"error": "Не авторизован"}, 401)
         cur.execute(f"""
-            SELECT u.id, u.email, u.whapi_token FROM {SCHEMA}.sessions s
+            SELECT u.id, u.email, u.green_api_instance_id, u.green_api_token FROM {SCHEMA}.sessions s
             JOIN {SCHEMA}.users u ON u.id = s.user_id
             WHERE s.id=%s AND s.expires_at > NOW()
         """, (session_id,))
         row = cur.fetchone()
         if not row:
             return json_response({"error": "Сессия истекла"}, 401)
-        return json_response({"user_id": row[0], "email": row[1], "has_token": bool(row[2])})
+        return json_response({"user_id": row[0], "email": row[1], "has_instance": bool(row[2] and row[3])})
 
     if action == "logout":
         if session_id:

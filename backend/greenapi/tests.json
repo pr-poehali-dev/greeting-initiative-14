@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "Статус без сессии — no_instance",
+      "method": "GET",
+      "path": "/?action=status",
+      "expectedStatus": 200,
+      "expectedBody": {"error": "no_instance"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

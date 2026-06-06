@@ -6,10 +6,7 @@ import Icon from "@/components/ui/icon";
 const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338b69b";
 
 function PasswordInput({ placeholder, value, onChange, onKeyDown }: {
-  placeholder: string;
-  value: string;
-  onChange: (v: string) => void;
-  onKeyDown?: (e: React.KeyboardEvent) => void;
+  placeholder: string; value: string; onChange: (v: string) => void; onKeyDown?: (e: React.KeyboardEvent) => void;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -24,7 +21,7 @@ function PasswordInput({ placeholder, value, onChange, onKeyDown }: {
   );
 }
 
-interface User { id: number; email: string; whapi_token: string; }
+interface User { id: number; email: string; instance_id: string; instance_token: string; }
 
 export default function Admin() {
   const [adminSecret, setAdminSecret] = useState("");
@@ -32,49 +29,47 @@ export default function Admin() {
   const [secretError, setSecretError] = useState("");
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
-  const [newUserToken, setNewUserToken] = useState("");
+  const [newInstanceId, setNewInstanceId] = useState("");
+  const [newInstanceToken, setNewInstanceToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [resetingId, setResetingId] = useState<number | null>(null);
-  const [savingTokenId, setSavingTokenId] = useState<number | null>(null);
+  const [savingId, setSavingId] = useState<number | null>(null);
   const [newPasswords, setNewPasswords] = useState<Record<number, string>>({});
-  const [editTokens, setEditTokens] = useState<Record<number, string>>({});
+  const [editInstances, setEditInstances] = useState<Record<number, { id: string; token: string }>>({});
 
   async function checkSecret() {
     if (!adminSecret.trim()) { setSecretError("Введите секретный ключ"); return; }
-    setLoadingUsers(true);
-    setSecretError("");
+    setLoadingUsers(true); setSecretError("");
     const res = await fetch(`${AUTH_URL}?action=list_users`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ secret: adminSecret }),
     });
     const data = await res.json();
     if (data.error) { setSecretError("Неверный ключ"); setLoadingUsers(false); return; }
     setUsers(data.users || []);
-    const tokens: Record<number, string> = {};
-    (data.users || []).forEach((u: User) => { tokens[u.id] = u.whapi_token || ""; });
-    setEditTokens(tokens);
-    setAuthed(true);
-    setLoadingUsers(false);
+    const inst: Record<number, { id: string; token: string }> = {};
+    (data.users || []).forEach((u: User) => { inst[u.id] = { id: u.instance_id || "", token: u.instance_token || "" }; });
+    setEditInstances(inst);
+    setAuthed(true); setLoadingUsers(false);
   }
 
-  async function saveToken(userId: number, email: string) {
-    setSavingTokenId(userId);
-    const res = await fetch(`${AUTH_URL}?action=set_token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, whapi_token: editTokens[userId] || "", secret: adminSecret }),
+  async function saveInstance(userId: number, email: string) {
+    setSavingId(userId);
+    const { id, token } = editInstances[userId] || { id: "", token: "" };
+    const res = await fetch(`${AUTH_URL}?action=set_instance`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, instance_id: id, instance_token: token, secret: adminSecret }),
     });
     const data = await res.json();
     if (data.ok) {
-      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, whapi_token: editTokens[userId] || "" } : u));
-      setResult({ ok: true, message: `Токен пользователя «${email}» сохранён` });
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, instance_id: id, instance_token: token } : u));
+      setResult({ ok: true, message: `Инстанс пользователя «${email}» сохранён` });
     }
-    setSavingTokenId(null);
+    setSavingId(null);
   }
 
   async function resetPassword(userId: number, email: string) {
@@ -83,15 +78,11 @@ export default function Admin() {
     if (!confirm(`Сбросить пароль пользователя «${email}»?`)) return;
     setResetingId(userId);
     const res = await fetch(`${AUTH_URL}?action=reset_password`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, new_password: newPass, secret: adminSecret }),
     });
     const data = await res.json();
-    if (data.ok) {
-      setNewPasswords((prev) => ({ ...prev, [userId]: "" }));
-      setResult({ ok: true, message: `Пароль пользователя «${email}» изменён` });
-    }
+    if (data.ok) { setNewPasswords((prev) => ({ ...prev, [userId]: "" })); setResult({ ok: true, message: `Пароль «${email}» изменён` }); }
     setResetingId(null);
   }
 
@@ -99,8 +90,7 @@ export default function Admin() {
     if (!confirm(`Удалить пользователя «${email}»?`)) return;
     setDeletingId(userId);
     const res = await fetch(`${AUTH_URL}?action=delete_user`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, secret: adminSecret }),
     });
     const data = await res.json();
@@ -110,22 +100,20 @@ export default function Admin() {
 
   async function createUser() {
     if (!login.trim() || !password.trim()) { setResult({ ok: false, message: "Заполните логин и пароль" }); return; }
-    setLoading(true);
-    setResult(null);
+    setLoading(true); setResult(null);
     const res = await fetch(`${AUTH_URL}?action=create_user`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: login.trim(), password, whapi_token: newUserToken.trim(), secret: adminSecret }),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: login.trim(), password, instance_id: newInstanceId.trim(), instance_token: newInstanceToken.trim(), secret: adminSecret }),
     });
     const data = await res.json();
     if (data.error) {
       setResult({ ok: false, message: data.error });
     } else {
       setResult({ ok: true, message: `Пользователь «${login}» создан` });
-      const newUser = { id: data.user_id, email: data.email, whapi_token: newUserToken.trim() };
-      setUsers((prev) => [...prev, newUser]);
-      setEditTokens((prev) => ({ ...prev, [data.user_id]: newUserToken.trim() }));
-      setLogin(""); setPassword(""); setNewUserToken("");
+      const nu = { id: data.user_id, email: data.email, instance_id: newInstanceId.trim(), instance_token: newInstanceToken.trim() };
+      setUsers((prev) => [...prev, nu]);
+      setEditInstances((prev) => ({ ...prev, [data.user_id]: { id: newInstanceId.trim(), token: newInstanceToken.trim() } }));
+      setLogin(""); setPassword(""); setNewInstanceId(""); setNewInstanceToken("");
     }
     setLoading(false);
   }
@@ -166,19 +154,24 @@ export default function Admin() {
           </div>
           <div>
             <div className="text-base font-bold text-foreground">Управление пользователями</div>
-            <div className="text-xs text-muted-foreground">Создание аккаунтов и назначение Whapi-токенов</div>
+            <div className="text-xs text-muted-foreground">Создание аккаунтов и назначение Green API инстансов</div>
           </div>
         </div>
 
-        {/* Создать пользователя */}
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 text-xs text-blue-300 space-y-1">
+          <div className="font-semibold">Где взять ID и токен инстанса?</div>
+          <div>Зайди на <span className="font-mono">green-api.com</span> → Мои инстансы → выбери инстанс → скопируй <b>IdInstance</b> и <b>ApiTokenInstance</b></div>
+        </div>
+
         <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
           <div className="text-sm font-semibold text-foreground">Новый пользователь</div>
           <div className="space-y-3">
             <Input placeholder="Логин" value={login} onChange={(e) => setLogin(e.target.value)} />
-            <PasswordInput placeholder="Пароль" value={password} onChange={setPassword}
-              onKeyDown={(e) => e.key === "Enter" && createUser()} />
-            <Input placeholder="Токен Whapi (можно добавить позже)" value={newUserToken}
-              onChange={(e) => setNewUserToken(e.target.value)} className="font-mono text-xs" />
+            <PasswordInput placeholder="Пароль" value={password} onChange={setPassword} onKeyDown={(e) => e.key === "Enter" && createUser()} />
+            <Input placeholder="ID инстанса (напр. 1234567890)" value={newInstanceId}
+              onChange={(e) => setNewInstanceId(e.target.value)} className="font-mono text-xs" />
+            <Input placeholder="Токен инстанса (можно добавить позже)" value={newInstanceToken}
+              onChange={(e) => setNewInstanceToken(e.target.value)} className="font-mono text-xs" />
           </div>
           {result && (
             <div className={`text-xs rounded-lg px-3 py-2 border ${result.ok ? "text-primary bg-primary/10 border-primary/20" : "text-red-400 bg-red-500/10 border-red-500/20"}`}>
@@ -191,7 +184,6 @@ export default function Admin() {
           </Button>
         </div>
 
-        {/* Список пользователей */}
         <div className="bg-card border border-border rounded-2xl p-6 space-y-3">
           <div className="text-sm font-semibold text-foreground">Все пользователи ({users.length})</div>
           {users.length === 0 ? (
@@ -205,25 +197,28 @@ export default function Admin() {
                       <Icon name="User" size={13} className="text-primary" />
                     </div>
                     <div className="text-sm text-foreground flex-1 font-medium">{u.email}</div>
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${u.whapi_token ? "bg-primary" : "bg-amber-500"}`}
-                      title={u.whapi_token ? "Токен назначен" : "Токен не назначен"} />
-                    <button onClick={() => deleteUser(u.id, u.email)} disabled={deletingId === u.id} title="Удалить"
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${u.instance_id && u.instance_token ? "bg-primary" : "bg-amber-500"}`}
+                      title={u.instance_id ? "Инстанс назначен" : "Инстанс не назначен"} />
+                    <button onClick={() => deleteUser(u.id, u.email)} disabled={deletingId === u.id}
                       className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-40">
                       <Icon name="Trash2" size={13} />
                     </button>
                   </div>
 
-                  <div className="px-3 pb-2">
-                    <div className="text-xs text-muted-foreground mb-1">Токен Whapi</div>
+                  <div className="px-3 pb-2 space-y-2">
+                    <div className="text-xs text-muted-foreground">Green API инстанс</div>
+                    <Input placeholder="ID инстанса"
+                      value={editInstances[u.id]?.id || ""}
+                      onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], id: e.target.value } }))}
+                      className="font-mono text-xs h-8" />
                     <div className="flex items-center gap-2">
-                      <Input placeholder="Токен из whapi.cloud → Каналы → Токен"
-                        value={editTokens[u.id] || ""}
-                        onChange={(e) => setEditTokens((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                      <Input placeholder="Токен инстанса"
+                        value={editInstances[u.id]?.token || ""}
+                        onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], token: e.target.value } }))}
                         className="font-mono text-xs h-8" />
-                      <button onClick={() => saveToken(u.id, u.email)} disabled={savingTokenId === u.id} title="Сохранить"
+                      <button onClick={() => saveInstance(u.id, u.email)} disabled={savingId === u.id}
                         className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all disabled:opacity-40">
-                        <Icon name={savingTokenId === u.id ? "Loader" : "Save"} size={13}
-                          className={savingTokenId === u.id ? "animate-spin" : ""} />
+                        <Icon name={savingId === u.id ? "Loader" : "Save"} size={13} className={savingId === u.id ? "animate-spin" : ""} />
                       </button>
                     </div>
                   </div>
@@ -236,7 +231,7 @@ export default function Admin() {
                         onChange={(v) => setNewPasswords((prev) => ({ ...prev, [u.id]: v }))}
                         onKeyDown={(e) => e.key === "Enter" && resetPassword(u.id, u.email)} />
                       <button onClick={() => resetPassword(u.id, u.email)}
-                        disabled={!newPasswords[u.id]?.trim() || resetingId === u.id} title="Сбросить пароль"
+                        disabled={!newPasswords[u.id]?.trim() || resetingId === u.id}
                         className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all disabled:opacity-40">
                         <Icon name="KeyRound" size={13} />
                       </button>
