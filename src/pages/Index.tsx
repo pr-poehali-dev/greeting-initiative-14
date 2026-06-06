@@ -705,13 +705,41 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 </div>
               )}
 
-              <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                <div className="text-sm font-semibold text-foreground">Текст сообщения</div>
-                <Textarea placeholder="Введите текст рассылки..." value={broadcastText} onChange={(e) => setBroadcastText(e.target.value)}
-                  rows={5} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground resize-none" />
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{broadcastText.length} символов</span>
-                  {broadcastText.length > 0 && <span className="text-primary">Готово к отправке</span>}
+              <div className="flex gap-4 items-start">
+                <div className="rounded-xl border border-border bg-card p-6 space-y-3 flex-1">
+                  <div className="text-sm font-semibold text-foreground">Текст сообщения</div>
+                  <Textarea placeholder="Введите текст рассылки..." value={broadcastText} onChange={(e) => setBroadcastText(e.target.value)}
+                    rows={5} className="bg-secondary border-border text-foreground placeholder:text-muted-foreground resize-none" />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{broadcastText.length} символов</span>
+                    {broadcastText.length > 0 && <span className="text-primary">Готово к отправке</span>}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 pt-10">
+                  {sendResult && (
+                    <div className={`rounded-lg border px-3 py-2 text-xs flex items-center gap-2 ${
+                      sendResult.failed === 0
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : sendResult.sent === 0
+                        ? "border-red-500/30 bg-red-500/10 text-red-400"
+                        : "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                    }`}>
+                      <Icon name={sendResult.failed === 0 ? "CheckCircle" : "AlertTriangle"} size={13} />
+                      <span>
+                        <b>{sendResult.sent}</b>/<b>{sendResult.total}</b>
+                        {sendResult.failed > 0 && ` (ошибок: ${sendResult.failed})`}
+                      </span>
+                    </div>
+                  )}
+                  <Button
+                    onClick={sendBroadcast}
+                    disabled={!broadcastText.trim() || selectedGroups.length === 0 || waStatus !== "connected" || sending}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11 text-sm font-semibold disabled:opacity-40 whitespace-nowrap"
+                  >
+                    <Icon name={sending ? "Loader" : "Send"} size={15} className={sending ? "animate-spin" : ""} />
+                    {sending ? "Отправляю..." : "Отправить"}
+                  </Button>
                 </div>
               </div>
 
@@ -761,30 +789,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 )}
               </div>
 
-              {sendResult && (
-                <div className={`rounded-lg border px-4 py-3 text-sm flex items-center gap-3 ${
-                  sendResult.failed === 0
-                    ? "border-primary/30 bg-primary/10 text-primary"
-                    : sendResult.sent === 0
-                    ? "border-red-500/30 bg-red-500/10 text-red-400"
-                    : "border-amber-500/30 bg-amber-500/10 text-amber-400"
-                }`}>
-                  <Icon name={sendResult.failed === 0 ? "CheckCircle" : "AlertTriangle"} size={15} />
-                  <span>
-                    Отправлено: <b>{sendResult.sent}</b> из <b>{sendResult.total}</b> групп
-                    {sendResult.failed > 0 && ` · Ошибок: ${sendResult.failed}`}
-                  </span>
-                </div>
-              )}
 
-              <Button
-                onClick={sendBroadcast}
-                disabled={!broadcastText.trim() || selectedGroups.length === 0 || waStatus !== "connected" || sending}
-                className="w-full bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11 text-sm font-semibold disabled:opacity-40"
-              >
-                <Icon name={sending ? "Loader" : "Send"} size={15} className={sending ? "animate-spin" : ""} />
-                {sending ? "Отправляю..." : "Отправить рассылку"}
-              </Button>
             </div>
           )}
 
