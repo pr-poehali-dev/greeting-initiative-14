@@ -87,24 +87,48 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
 
   const apiHeaders = { "X-Session-Id": sessionId };
 
-  // Polling for QR / connection status
+  const qrRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Polling for connection status + автообновление QR каждые 15 сек
   useEffect(() => {
     if (waStatus === "qr") {
+      // Проверяем статус каждые 4 сек
       pollRef.current = setInterval(async () => {
         try {
           const res = await fetch(`${GREENAPI_URL}?action=status`, { headers: apiHeaders });
           const data = await res.json();
           if (data.connected || data.status === "authorized") {
             clearInterval(pollRef.current!);
+            clearInterval(qrRefreshRef.current!);
             setWaStatus("connected");
             setBotActive(true);
             setQrImage(null);
             fetchWaGroups();
           }
-        } catch (_e) { /* ignore poll error */ }
+        } catch (_e) { /* ignore */ }
       }, 4000);
+
+      // Обновляем QR каждые 15 сек пока не отсканировали
+      qrRefreshRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`${GREENAPI_URL}?action=qr`, { headers: apiHeaders });
+          const data = await res.json();
+          if (data.already_connected) {
+            clearInterval(pollRef.current!);
+            clearInterval(qrRefreshRef.current!);
+            setWaStatus("connected");
+            setBotActive(true);
+            fetchWaGroups();
+          } else if (data.qr_code) {
+            setQrImage(data.qr_code);
+          }
+        } catch (_e) { /* ignore */ }
+      }, 15000);
     }
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (qrRefreshRef.current) clearInterval(qrRefreshRef.current);
+    };
   }, [waStatus]);
 
   async function requestQr() {
