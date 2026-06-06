@@ -44,9 +44,9 @@ def handler(event: dict, context) -> dict:
         secret = body.get("secret", "")
         if secret != os.environ.get("ADMIN_SECRET", ""):
             return json_response({"error": "Forbidden"}, 403)
-        cur.execute(f"SELECT id, email, green_api_instance_id, green_api_token FROM {SCHEMA}.users ORDER BY id")
+        cur.execute(f"SELECT id, email, green_api_instance_id, green_api_token, max_api_instance_id, max_api_token, telegram_bot_token FROM {SCHEMA}.users ORDER BY id")
         rows = cur.fetchall()
-        return json_response({"users": [{"id": r[0], "email": r[1], "instance_id": r[2] or "", "instance_token": r[3] or ""} for r in rows]})
+        return json_response({"users": [{"id": r[0], "email": r[1], "instance_id": r[2] or "", "instance_token": r[3] or "", "max_instance_id": r[4] or "", "max_instance_token": r[5] or "", "telegram_bot_token": r[6] or ""} for r in rows]})
 
     if action == "create_user":
         secret = body.get("secret", "")
@@ -80,9 +80,14 @@ def handler(event: dict, context) -> dict:
         user_id = body.get("user_id")
         instance_id = body.get("instance_id", "").strip()
         instance_token = body.get("instance_token", "").strip()
+        max_instance_id = body.get("max_instance_id", "").strip()
+        max_instance_token = body.get("max_instance_token", "").strip()
+        telegram_bot_token = body.get("telegram_bot_token", "").strip()
         if not user_id:
             return json_response({"error": "user_id обязателен"}, 400)
-        cur.execute(f"UPDATE {SCHEMA}.users SET green_api_instance_id=%s, green_api_token=%s WHERE id=%s", (instance_id, instance_token, user_id))
+        cur.execute(f"""UPDATE {SCHEMA}.users SET green_api_instance_id=%s, green_api_token=%s,
+            max_api_instance_id=%s, max_api_token=%s, telegram_bot_token=%s WHERE id=%s""",
+            (instance_id, instance_token, max_instance_id, max_instance_token, telegram_bot_token, user_id))
         db.commit()
         return json_response({"ok": True})
 

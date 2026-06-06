@@ -8,9 +8,11 @@ import { Switch } from "@/components/ui/switch";
 const GREENAPI_URL = "https://functions.poehali.dev/2be7b0f6-d7f9-474a-b21e-d4a74f848153";
 const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338b69b";
 const SEND_URL = "https://functions.poehali.dev/3c368aad-a7c2-4a91-9095-ac1a47fe77c9";
+const TELEGRAM_URL = "https://functions.poehali.dev/97d4798c-1a93-44d3-9fdc-40acf141a66b";
 
 type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect";
 type WaStatus = "disconnected" | "loading" | "qr" | "connected";
+type Platform = "whatsapp" | "max" | "telegram";
 
 interface IndexProps {
   sessionId: string;
@@ -56,6 +58,7 @@ const tagColors: Record<string, string> = {
 
 const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [tab, setTab] = useState<Tab>("dashboard");
+  const [platform, setPlatform] = useState<Platform>("whatsapp");
   const [botActive, setBotActive] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [broadcastText, setBroadcastText] = useState("");
@@ -67,14 +70,22 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupTag, setNewGroupTag] = useState("Клиенты");
 
-  // WhatsApp connection state
+  // WhatsApp / MAX connection state
   const [waStatus, setWaStatus] = useState<WaStatus>("disconnected");
+  const [maxStatus, setMaxStatus] = useState<WaStatus>("disconnected");
   const [qrImage, setQrImage] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
   const [importedGroups, setImportedGroups] = useState<WaGroup[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [selectedWaGroups, setSelectedWaGroups] = useState<string[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Telegram state
+  const [tgStatus, setTgStatus] = useState<"disconnected" | "connected" | "loading">("disconnected");
+  const [tgBotName, setTgBotName] = useState<string>("");
+  const [tgGroups, setTgGroups] = useState<WaGroup[]>([]);
+  const [tgSelectedGroups, setTgSelectedGroups] = useState<string[]>([]);
+  const [loadingTgGroups, setLoadingTgGroups] = useState(false);
 
   const navItems: { id: Tab; label: string; icon: string }[] = [
     { id: "dashboard", label: "Дашборд", icon: "LayoutDashboard" },
@@ -90,36 +101,36 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
 
   const qrRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Polling for connection status + автообновление QR каждые 15 сек
+  // Polling для WA/MAX QR
   useEffect(() => {
-    if (waStatus === "qr") {
-      // Проверяем статус каждые 4 сек
+    const activeStatus = platform === "max" ? maxStatus : waStatus;
+    const setStatus = platform === "max" ? setMaxStatus : setWaStatus;
+    if (activeStatus === "qr") {
       pollRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`${GREENAPI_URL}?action=status`, { headers: apiHeaders });
+          const res = await fetch(`${GREENAPI_URL}?action=status&platform=${platform}`, { headers: apiHeaders });
           const data = await res.json();
           if (data.connected || data.status === "authorized") {
             clearInterval(pollRef.current!);
             clearInterval(qrRefreshRef.current!);
-            setWaStatus("connected");
+            setStatus("connected");
             setBotActive(true);
             setQrImage(null);
-            fetchWaGroups();
+            fetchWaGroups(platform);
           }
         } catch (_e) { /* ignore */ }
       }, 4000);
 
-      // Обновляем QR каждые 15 сек пока не отсканировали
       qrRefreshRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`${GREENAPI_URL}?action=qr`, { headers: apiHeaders });
+          const res = await fetch(`${GREENAPI_URL}?action=qr&platform=${platform}`, { headers: apiHeaders });
           const data = await res.json();
           if (data.already_connected) {
             clearInterval(pollRef.current!);
             clearInterval(qrRefreshRef.current!);
-            setWaStatus("connected");
+            setStatus("connected");
             setBotActive(true);
-            fetchWaGroups();
+            fetchWaGroups(platform);
           } else if (data.qr_code) {
             setQrImage(data.qr_code);
           }
@@ -130,53 +141,55 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (qrRefreshRef.current) clearInterval(qrRefreshRef.current);
     };
-  }, [waStatus]);
+  }, [waStatus, maxStatus, platform]);
 
   async function requestQr() {
-    setWaStatus("loading");
+    const setStatus = platform === "max" ? setMaxStatus : setWaStatus;
+    setStatus("loading");
     setQrError(null);
     setQrImage(null);
     try {
-      const res = await fetch(`${GREENAPI_URL}?action=qr`, { headers: apiHeaders });
+      const res = await fetch(`${GREENAPI_URL}?action=qr&platform=${platform}`, { headers: apiHeaders });
       const data = await res.json();
       if (data.error === "no_instance") {
         setQrError("Инстанс не назначен. Обратитесь к администратору.");
-        setWaStatus("disconnected");
+        setStatus("disconnected");
         return;
       }
       if (data.already_connected) {
-        setWaStatus("connected");
+        setStatus("connected");
         setBotActive(true);
-        fetchWaGroups();
+        fetchWaGroups(platform);
         return;
       }
       if (data.qr_code) {
         setQrImage(data.qr_code);
-        setWaStatus("qr");
+        setStatus("qr");
       } else {
         setQrError(data.error || "Не удалось получить QR-код. Попробуйте ещё раз.");
-        setWaStatus("disconnected");
+        setStatus("disconnected");
       }
     } catch {
       setQrError("Ошибка соединения с сервером. Попробуйте ещё раз.");
-      setWaStatus("disconnected");
+      (platform === "max" ? setMaxStatus : setWaStatus)("disconnected");
     }
   }
 
   async function disconnectWa() {
     try {
-      await fetch(`${GREENAPI_URL}?action=logout`, { headers: apiHeaders });
+      await fetch(`${GREENAPI_URL}?action=logout&platform=${platform}`, { headers: apiHeaders });
     } catch { /* ignore */ }
-    setWaStatus("disconnected");
+    if (platform === "max") setMaxStatus("disconnected");
+    else setWaStatus("disconnected");
     setBotActive(false);
     setQrImage(null);
     setImportedGroups([]);
   }
 
-  async function fetchWaGroups() {
+  async function fetchWaGroups(plat: Platform = "whatsapp") {
     setLoadingGroups(true);
     try {
-      const res = await fetch(`${GREENAPI_URL}?action=groups`, { headers: apiHeaders });
+      const res = await fetch(`${GREENAPI_URL}?action=groups&platform=${plat}`, { headers: apiHeaders });
       const data = await res.json();
       setImportedGroups(data.groups || []);
     } catch {
@@ -186,9 +199,67 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     }
   }
 
+  async function checkTgStatus() {
+    setTgStatus("loading");
+    try {
+      const res = await fetch(`${TELEGRAM_URL}?action=status`, { headers: apiHeaders });
+      const data = await res.json();
+      if (data.connected) {
+        setTgStatus("connected");
+        setTgBotName(data.bot?.username || data.bot?.first_name || "Бот");
+        fetchTgGroups();
+      } else {
+        setTgStatus("disconnected");
+        if (data.error === "no_token") setQrError("Токен бота не назначен. Обратитесь к администратору.");
+      }
+    } catch {
+      setTgStatus("disconnected");
+    }
+  }
+
+  async function fetchTgGroups() {
+    setLoadingTgGroups(true);
+    try {
+      const res = await fetch(`${TELEGRAM_URL}?action=groups`, { headers: apiHeaders });
+      const data = await res.json();
+      setTgGroups(data.groups || []);
+    } catch {
+      setTgGroups([]);
+    } finally {
+      setLoadingTgGroups(false);
+    }
+  }
+
   async function sendBroadcast() {
+    if (!broadcastText.trim()) return;
+
+    if (platform === "telegram") {
+      if (tgSelectedGroups.length === 0) return;
+      setSending(true); setSendResult(null);
+      setSendProgress({ done: 0, total: tgSelectedGroups.length });
+      const BATCH = 20;
+      let totalSent = 0, totalFailed = 0;
+      for (let i = 0; i < tgSelectedGroups.length; i += BATCH) {
+        const batch = tgSelectedGroups.slice(i, i + BATCH);
+        try {
+          const res = await fetch(`${TELEGRAM_URL}?action=send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+            body: JSON.stringify({ text: broadcastText, chat_ids: batch }),
+          });
+          const data = await res.json();
+          totalSent += data.sent ?? 0;
+          totalFailed += data.failed ?? 0;
+        } catch { totalFailed += batch.length; }
+        setSendProgress({ done: Math.min(i + BATCH, tgSelectedGroups.length), total: tgSelectedGroups.length });
+      }
+      setSendResult({ sent: totalSent, failed: totalFailed, total: tgSelectedGroups.length });
+      setSendProgress(null); setSending(false);
+      return;
+    }
+
     const targetGroups = groups.filter((g) => selectedGroups.includes(g.id) && g.waId);
-    if (!broadcastText.trim() || targetGroups.length === 0) return;
+    if (targetGroups.length === 0) return;
     setSending(true);
     setSendResult(null);
     setSendProgress({ done: 0, total: targetGroups.length });
@@ -203,7 +274,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 120000);
-        const res = await fetch(SEND_URL, {
+        const res = await fetch(`${SEND_URL}?platform=${platform}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
           body: JSON.stringify({ text: broadcastText, group_ids: batch }),
@@ -224,7 +295,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setSending(false);
   }
 
-  function importSelectedGroups() {
+  function importSelectedGroups(plat: Platform = "whatsapp") {
+    const tag = plat === "max" ? "MAX" : "WhatsApp";
     const toAdd = importedGroups
       .filter((g) => selectedWaGroups.includes(g.id))
       .map((g) => ({
@@ -232,7 +304,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
         name: g.name,
         members: g.members,
         active: true,
-        tag: "WhatsApp",
+        tag,
         waId: g.id,
       }));
     setGroups((prev) => {
@@ -241,6 +313,26 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       return [...prev, ...fresh];
     });
     setSelectedWaGroups([]);
+    setTab("groups");
+  }
+
+  function importTgGroups() {
+    const toAdd = tgGroups
+      .filter((g) => tgSelectedGroups.includes(g.id))
+      .map((g) => ({
+        id: Date.now() + Math.random(),
+        name: g.name,
+        members: g.members,
+        active: true,
+        tag: "Telegram",
+        waId: g.id,
+      }));
+    setGroups((prev) => {
+      const existingIds = new Set(prev.map((g) => g.waId).filter(Boolean));
+      const fresh = toAdd.filter((g) => !existingIds.has(g.waId));
+      return [...prev, ...fresh];
+    });
+    setTgSelectedGroups([]);
     setTab("groups");
   }
 
@@ -341,161 +433,223 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
           {/* ── CONNECT ── */}
           {tab === "connect" && (
             <div className="max-w-lg space-y-6">
-              {/* Status card */}
-              <div className={`rounded-xl border p-5 flex items-start gap-4 transition-all
-                ${waStatus === "connected" ? "border-primary/40 bg-primary/5" : "border-border bg-card"}`}>
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0
-                  ${waStatus === "connected" ? "bg-primary/20" : "bg-secondary"}`}>
-                  <Icon name={waStatus === "connected" ? "CheckCircle" : "Smartphone"} size={20}
-                    className={waStatus === "connected" ? "text-primary" : "text-muted-foreground"} />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-foreground">
-                    {waStatus === "connected" ? "WhatsApp успешно подключён" :
-                     waStatus === "qr" ? "Отсканируйте QR-код" :
-                     waStatus === "loading" ? "Загрузка..." :
-                     "WhatsApp не подключён"}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {waStatus === "connected" ? "Аккаунт авторизован, можно отправлять рассылки" :
-                     waStatus === "qr" ? "Откройте WhatsApp → Связанные устройства → Привязать устройство" :
-                     waStatus === "loading" ? "Запрашиваем QR-код..." :
-                     "Нажмите кнопку ниже, чтобы получить QR-код для авторизации"}
-                  </div>
-                </div>
+
+              {/* Переключатель платформ */}
+              <div className="flex rounded-xl border border-border bg-card p-1 gap-1">
+                {([["whatsapp", "WhatsApp", "MessageCircle"], ["max", "MAX", "Zap"], ["telegram", "Telegram", "Send"]] as const).map(([id, label, icon]) => (
+                  <button
+                    key={id}
+                    onClick={() => { setPlatform(id); setQrError(null); setQrImage(null); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all
+                      ${platform === id ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <Icon name={icon} size={15} />
+                    {label}
+                  </button>
+                ))}
               </div>
 
-              {/* QR block */}
-              {waStatus === "qr" && qrImage && (
-                <div className="rounded-xl border border-border bg-card p-6 flex flex-col items-center gap-4 animate-fade-in">
-                  <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">QR-код для входа</div>
-                  <div className="rounded-xl overflow-hidden border-4 border-white shadow-lg">
-                    <img src={qrImage} alt="WhatsApp QR" className="w-52 h-52 object-contain" />
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    Ожидаем сканирования...
-                  </div>
-                  <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={requestQr}>
-                    <Icon name="RefreshCw" size={12} className="mr-1" />
-                    Обновить QR
-                  </Button>
-                </div>
-              )}
-
-              {/* Error */}
-              {qrError && (
-                <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive animate-fade-in">
-                  {qrError}
-                </div>
-              )}
-
-              {/* Action buttons */}
-              {waStatus === "disconnected" && (
-                <Button onClick={requestQr} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11">
-                  <Icon name="QrCode" size={16} />
-                  Получить QR-код для входа
-                </Button>
-              )}
-
-              {waStatus === "loading" && (
-                <Button disabled className="w-full h-11 gap-2 opacity-60">
-                  <Icon name="Loader" size={16} className="animate-spin" />
-                  Загружаем QR-код...
-                </Button>
-              )}
-
-              {/* Сменить аккаунт */}
-              {waStatus === "connected" && (
-                <Button variant="outline" onClick={disconnectWa} className="w-full h-11 gap-2 border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300">
-                  <Icon name="RefreshCw" size={16} />
-                  Сменить аккаунт WhatsApp
-                </Button>
-              )}
-
-              {/* Connected — groups import */}
-              {waStatus === "connected" && (
-                <div className="rounded-xl border border-border bg-card overflow-hidden animate-fade-in">
-                  <div className="px-6 py-4 border-b border-border flex items-center justify-between">
-                    <span className="text-sm font-semibold text-foreground">Группы вашего WhatsApp</span>
-                    <div className="flex items-center gap-2">
-                      {importedGroups.length > 0 && (
-                        <button
-                          onClick={() => selectedWaGroups.length === importedGroups.length
-                            ? setSelectedWaGroups([])
-                            : setSelectedWaGroups(importedGroups.map((g) => g.id))}
-                          className="text-xs text-primary hover:underline"
-                        >
-                          {selectedWaGroups.length === importedGroups.length ? "Снять всё" : "Отметить всё"}
-                        </button>
-                      )}
-                      <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 gap-1" onClick={fetchWaGroups}>
-                        <Icon name="RefreshCw" size={12} />
-                        Обновить
-                      </Button>
-                    </div>
-                  </div>
-
-                  {loadingGroups ? (
-                    <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground text-sm">
-                      <Icon name="Loader" size={16} className="animate-spin" />
-                      Загружаем группы...
-                    </div>
-                  ) : importedGroups.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
-                      <Icon name="Users" size={32} className="opacity-30" />
-                      <span className="text-sm">Группы не найдены</span>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="divide-y divide-border/50 max-h-72 overflow-y-auto">
-                        {importedGroups.map((g) => (
-                          <label key={g.id} className={`flex items-center gap-3 px-6 py-3.5 cursor-pointer transition-colors
-                            ${selectedWaGroups.includes(g.id) ? "bg-primary/5" : "hover:bg-secondary/40"}`}>
-                            <input
-                              type="checkbox"
-                              checked={selectedWaGroups.includes(g.id)}
-                              onChange={() => toggleWaGroup(g.id)}
-                              className="w-4 h-4 accent-green-500"
-                            />
-                            <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
-                              <Icon name="Users" size={13} className="text-muted-foreground" />
-                            </div>
-                            <span className="text-sm text-foreground font-medium flex-1 truncate">{g.name}</span>
-                            <span className="text-xs text-muted-foreground shrink-0">{g.members} уч.</span>
-                          </label>
-                        ))}
+              {/* WhatsApp / MAX — QR подключение */}
+              {(platform === "whatsapp" || platform === "max") && (() => {
+                const st = platform === "max" ? maxStatus : waStatus;
+                const platformLabel = platform === "max" ? "MAX" : "WhatsApp";
+                return (
+                  <>
+                    <div className={`rounded-xl border p-5 flex items-start gap-4 transition-all
+                      ${st === "connected" ? "border-primary/40 bg-primary/5" : "border-border bg-card"}`}>
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0
+                        ${st === "connected" ? "bg-primary/20" : "bg-secondary"}`}>
+                        <Icon name={st === "connected" ? "CheckCircle" : "Smartphone"} size={20}
+                          className={st === "connected" ? "text-primary" : "text-muted-foreground"} />
                       </div>
-                      <div className="px-6 py-4 border-t border-border flex items-center justify-between">
-                        <span className="text-xs text-muted-foreground">
-                          {selectedWaGroups.length > 0
-                            ? `Выбрано: ${selectedWaGroups.length}`
-                            : "Отметьте группы для добавления"}
-                        </span>
-                        <Button
-                          size="sm"
-                          disabled={selectedWaGroups.length === 0}
-                          onClick={importSelectedGroups}
-                          className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 disabled:opacity-40"
-                        >
-                          <Icon name="Download" size={13} />
-                          Добавить в рассылки
+                      <div>
+                        <div className="text-sm font-semibold text-foreground">
+                          {st === "connected" ? `${platformLabel} успешно подключён` :
+                           st === "qr" ? "Отсканируйте QR-код" :
+                           st === "loading" ? "Загрузка..." :
+                           `${platformLabel} не подключён`}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {st === "connected" ? "Аккаунт авторизован, можно отправлять рассылки" :
+                           st === "qr" ? `Откройте ${platformLabel} → Связанные устройства → Привязать устройство` :
+                           st === "loading" ? "Запрашиваем QR-код..." :
+                           "Нажмите кнопку ниже, чтобы получить QR-код для авторизации"}
+                        </div>
+                      </div>
+                    </div>
+
+                    {st === "qr" && qrImage && (
+                      <div className="rounded-xl border border-border bg-card p-6 flex flex-col items-center gap-4 animate-fade-in">
+                        <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">QR-код для входа</div>
+                        <div className="rounded-xl overflow-hidden border-4 border-white shadow-lg">
+                          <img src={qrImage} alt="QR" className="w-52 h-52 object-contain" />
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                          Ожидаем сканирования...
+                        </div>
+                        <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={requestQr}>
+                          <Icon name="RefreshCw" size={12} className="mr-1" />Обновить QR
                         </Button>
                       </div>
-                    </>
-                  )}
-                </div>
-              )}
+                    )}
 
-              {/* Disconnect */}
-              {waStatus === "connected" && (
-                <button
-                  onClick={() => { setWaStatus("disconnected"); setBotActive(false); setImportedGroups([]); setQrImage(null); }}
-                  className="text-xs text-muted-foreground hover:text-destructive transition-colors flex items-center gap-1"
-                >
-                  <Icon name="LogOut" size={12} />
-                  Отключить WhatsApp
-                </button>
+                    {qrError && (
+                      <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive animate-fade-in">
+                        {qrError}
+                      </div>
+                    )}
+
+                    {st === "disconnected" && (
+                      <Button onClick={requestQr} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11">
+                        <Icon name="QrCode" size={16} />Получить QR-код для входа
+                      </Button>
+                    )}
+                    {st === "loading" && (
+                      <Button disabled className="w-full h-11 gap-2 opacity-60">
+                        <Icon name="Loader" size={16} className="animate-spin" />Загружаем QR-код...
+                      </Button>
+                    )}
+                    {st === "connected" && (
+                      <Button variant="outline" onClick={disconnectWa} className="w-full h-11 gap-2 border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300">
+                        <Icon name="RefreshCw" size={16} />Сменить аккаунт {platformLabel}
+                      </Button>
+                    )}
+
+                    {st === "connected" && (
+                      <div className="rounded-xl border border-border bg-card overflow-hidden animate-fade-in">
+                        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                          <span className="text-sm font-semibold text-foreground">Группы вашего {platformLabel}</span>
+                          <div className="flex items-center gap-2">
+                            {importedGroups.length > 0 && (
+                              <button
+                                onClick={() => selectedWaGroups.length === importedGroups.length ? setSelectedWaGroups([]) : setSelectedWaGroups(importedGroups.map((g) => g.id))}
+                                className="text-xs text-primary hover:underline"
+                              >
+                                {selectedWaGroups.length === importedGroups.length ? "Снять всё" : "Отметить всё"}
+                              </button>
+                            )}
+                            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 gap-1" onClick={() => fetchWaGroups(platform)}>
+                              <Icon name="RefreshCw" size={12} />Обновить
+                            </Button>
+                          </div>
+                        </div>
+                        {loadingGroups ? (
+                          <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground text-sm">
+                            <Icon name="Loader" size={16} className="animate-spin" />Загружаем группы...
+                          </div>
+                        ) : importedGroups.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+                            <Icon name="Users" size={32} className="opacity-30" />
+                            <span className="text-sm">Группы не найдены</span>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="divide-y divide-border/50 max-h-72 overflow-y-auto">
+                              {importedGroups.map((g) => (
+                                <label key={g.id} className={`flex items-center gap-3 px-6 py-3.5 cursor-pointer transition-colors ${selectedWaGroups.includes(g.id) ? "bg-primary/5" : "hover:bg-secondary/40"}`}>
+                                  <input type="checkbox" checked={selectedWaGroups.includes(g.id)} onChange={() => toggleWaGroup(g.id)} className="w-4 h-4 accent-green-500" />
+                                  <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
+                                    <Icon name="Users" size={13} className="text-muted-foreground" />
+                                  </div>
+                                  <span className="text-sm text-foreground font-medium flex-1 truncate">{g.name}</span>
+                                  <span className="text-xs text-muted-foreground shrink-0">{g.members} уч.</span>
+                                </label>
+                              ))}
+                            </div>
+                            <div className="px-6 py-4 border-t border-border flex items-center justify-between">
+                              <span className="text-xs text-muted-foreground">{selectedWaGroups.length > 0 ? `Выбрано: ${selectedWaGroups.length}` : "Отметьте группы для добавления"}</span>
+                              <Button size="sm" disabled={selectedWaGroups.length === 0} onClick={() => importSelectedGroups(platform)} className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 disabled:opacity-40">
+                                <Icon name="Download" size={13} />Добавить в рассылки
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* Telegram */}
+              {platform === "telegram" && (
+                <>
+                  <div className={`rounded-xl border p-5 flex items-start gap-4 transition-all ${tgStatus === "connected" ? "border-primary/40 bg-primary/5" : "border-border bg-card"}`}>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${tgStatus === "connected" ? "bg-primary/20" : "bg-secondary"}`}>
+                      <Icon name={tgStatus === "connected" ? "CheckCircle" : "Send"} size={20} className={tgStatus === "connected" ? "text-primary" : "text-muted-foreground"} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">
+                        {tgStatus === "connected" ? `Бот @${tgBotName} подключён` : tgStatus === "loading" ? "Проверяем бота..." : "Telegram не подключён"}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {tgStatus === "connected" ? "Бот активен, можно отправлять рассылки в группы" : "Администратор должен назначить токен Telegram-бота"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {tgStatus === "disconnected" && (
+                    <Button onClick={checkTgStatus} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11">
+                      <Icon name="Send" size={16} />Проверить подключение бота
+                    </Button>
+                  )}
+                  {tgStatus === "loading" && (
+                    <Button disabled className="w-full h-11 gap-2 opacity-60">
+                      <Icon name="Loader" size={16} className="animate-spin" />Подключаемся...
+                    </Button>
+                  )}
+
+                  {tgStatus === "connected" && (
+                    <div className="rounded-xl border border-border bg-card overflow-hidden animate-fade-in">
+                      <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                        <span className="text-sm font-semibold text-foreground">Группы бота</span>
+                        <div className="flex items-center gap-2">
+                          {tgGroups.length > 0 && (
+                            <button
+                              onClick={() => tgSelectedGroups.length === tgGroups.length ? setTgSelectedGroups([]) : setTgSelectedGroups(tgGroups.map((g) => g.id))}
+                              className="text-xs text-primary hover:underline"
+                            >
+                              {tgSelectedGroups.length === tgGroups.length ? "Снять всё" : "Отметить всё"}
+                            </button>
+                          )}
+                          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 gap-1" onClick={fetchTgGroups}>
+                            <Icon name="RefreshCw" size={12} />Обновить
+                          </Button>
+                        </div>
+                      </div>
+                      {loadingTgGroups ? (
+                        <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground text-sm">
+                          <Icon name="Loader" size={16} className="animate-spin" />Загружаем группы...
+                        </div>
+                      ) : tgGroups.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+                          <Icon name="Users" size={32} className="opacity-30" />
+                          <span className="text-sm">Добавьте бота в группы в Telegram</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="divide-y divide-border/50 max-h-72 overflow-y-auto">
+                            {tgGroups.map((g) => (
+                              <label key={g.id} className={`flex items-center gap-3 px-6 py-3.5 cursor-pointer transition-colors ${tgSelectedGroups.includes(g.id) ? "bg-primary/5" : "hover:bg-secondary/40"}`}>
+                                <input type="checkbox" checked={tgSelectedGroups.includes(g.id)} onChange={() => setTgSelectedGroups((prev) => prev.includes(g.id) ? prev.filter((x) => x !== g.id) : [...prev, g.id])} className="w-4 h-4 accent-blue-500" />
+                                <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
+                                  <Icon name="Send" size={13} className="text-muted-foreground" />
+                                </div>
+                                <span className="text-sm text-foreground font-medium flex-1 truncate">{g.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="px-6 py-4 border-t border-border flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">{tgSelectedGroups.length > 0 ? `Выбрано: ${tgSelectedGroups.length}` : "Отметьте группы"}</span>
+                            <Button size="sm" disabled={tgSelectedGroups.length === 0} onClick={importTgGroups} className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 disabled:opacity-40">
+                              <Icon name="Download" size={13} />Добавить в рассылки
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -732,15 +886,49 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
           {/* ── BROADCAST ── */}
           {tab === "broadcast" && (
             <div className="max-w-2xl space-y-6">
-              {waStatus !== "connected" && (
+
+              {/* Переключатель платформ */}
+              <div className="flex rounded-xl border border-border bg-card p-1 gap-1">
+                {([["whatsapp", "WhatsApp", "MessageCircle"], ["max", "MAX", "Zap"], ["telegram", "Telegram", "Send"]] as const).map(([id, label, icon]) => (
+                  <button key={id} onClick={() => { setPlatform(id); setSendResult(null); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all
+                      ${platform === id ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"}`}>
+                    <Icon name={icon} size={15} />{label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Предупреждение если не подключено */}
+              {platform === "whatsapp" && waStatus !== "connected" && (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <Icon name="AlertTriangle" size={16} className="text-amber-400 shrink-0" />
                     <span className="text-sm text-amber-300">Для отправки подключите WhatsApp</span>
                   </div>
-                  <Button size="sm" onClick={() => setTab("connect")} className="bg-amber-500 text-white hover:bg-amber-500/90 shrink-0 gap-1.5">
-                    <Icon name="QrCode" size={13} />
-                    Подключить
+                  <Button size="sm" onClick={() => { setTab("connect"); setPlatform("whatsapp"); }} className="bg-amber-500 text-white hover:bg-amber-500/90 shrink-0 gap-1.5">
+                    <Icon name="QrCode" size={13} />Подключить
+                  </Button>
+                </div>
+              )}
+              {platform === "max" && maxStatus !== "connected" && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Icon name="AlertTriangle" size={16} className="text-amber-400 shrink-0" />
+                    <span className="text-sm text-amber-300">Для отправки подключите MAX</span>
+                  </div>
+                  <Button size="sm" onClick={() => { setTab("connect"); setPlatform("max"); }} className="bg-amber-500 text-white hover:bg-amber-500/90 shrink-0 gap-1.5">
+                    <Icon name="Zap" size={13} />Подключить
+                  </Button>
+                </div>
+              )}
+              {platform === "telegram" && tgStatus !== "connected" && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Icon name="AlertTriangle" size={16} className="text-amber-400 shrink-0" />
+                    <span className="text-sm text-amber-300">Для отправки подключите Telegram-бота</span>
+                  </div>
+                  <Button size="sm" onClick={() => { setTab("connect"); setPlatform("telegram"); }} className="bg-amber-500 text-white hover:bg-amber-500/90 shrink-0 gap-1.5">
+                    <Icon name="Send" size={13} />Подключить
                   </Button>
                 </div>
               )}
@@ -759,7 +947,12 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 <div className="flex flex-col gap-3 pt-10">
                   <Button
                     onClick={sendBroadcast}
-                    disabled={!broadcastText.trim() || selectedGroups.length === 0 || waStatus !== "connected" || sending}
+                    disabled={
+                      !broadcastText.trim() || sending ||
+                      (platform === "telegram" ? tgStatus !== "connected" || tgSelectedGroups.length === 0 :
+                       platform === "max" ? maxStatus !== "connected" || selectedGroups.length === 0 :
+                       waStatus !== "connected" || selectedGroups.length === 0)
+                    }
                     className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11 text-sm font-semibold disabled:opacity-40 whitespace-nowrap"
                   >
                     <Icon name={sending ? "Loader" : "Send"} size={15} className={sending ? "animate-spin" : ""} />
@@ -772,10 +965,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                         <span>{sendProgress.done} / {sendProgress.total}</span>
                       </div>
                       <div className="h-2 rounded-full bg-secondary overflow-hidden">
-                        <div
-                          className="h-full bg-primary rounded-full transition-all duration-500"
-                          style={{ width: `${Math.round((sendProgress.done / sendProgress.total) * 100)}%` }}
-                        />
+                        <div className="h-full bg-primary rounded-full transition-all duration-500"
+                          style={{ width: `${Math.round((sendProgress.done / sendProgress.total) * 100)}%` }} />
                       </div>
                     </div>
                   )}
@@ -785,15 +976,9 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
               {/* Результат рассылки */}
               {sendResult && (
                 <div className={`rounded-xl border p-5 flex items-center gap-4 animate-fade-in ${
-                  sendResult.failed === 0
-                    ? "border-primary/40 bg-primary/10"
-                    : sendResult.sent === 0
-                    ? "border-red-500/40 bg-red-500/10"
-                    : "border-amber-500/40 bg-amber-500/10"
+                  sendResult.failed === 0 ? "border-primary/40 bg-primary/10" : sendResult.sent === 0 ? "border-red-500/40 bg-red-500/10" : "border-amber-500/40 bg-amber-500/10"
                 }`}>
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    sendResult.failed === 0 ? "bg-primary/20" : sendResult.sent === 0 ? "bg-red-500/20" : "bg-amber-500/20"
-                  }`}>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${sendResult.failed === 0 ? "bg-primary/20" : sendResult.sent === 0 ? "bg-red-500/20" : "bg-amber-500/20"}`}>
                     <Icon name={sendResult.failed === 0 ? "CheckCircle" : "AlertTriangle"} size={20}
                       className={sendResult.failed === 0 ? "text-primary" : sendResult.sent === 0 ? "text-red-400" : "text-amber-400"} />
                   </div>
@@ -812,53 +997,75 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 </div>
               )}
 
-              <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-foreground">Выберите группы получателей</div>
-                  {groups.filter((g) => g.active).length > 0 && (
-                    <button
-                      onClick={() => {
-                        const activeIds = groups.filter((g) => g.active).map((g) => g.id);
-                        if (selectedGroups.length === activeIds.length) {
-                          setSelectedGroups([]);
-                        } else {
-                          setSelectedGroups(activeIds);
-                        }
-                      }}
-                      className="text-xs text-primary hover:underline"
-                    >
-                      {selectedGroups.length === groups.filter((g) => g.active).length ? "Снять всё" : "Отметить всё"}
-                    </button>
+              {/* Telegram — выбор групп из tgSelectedGroups */}
+              {platform === "telegram" && tgStatus === "connected" && (
+                <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-foreground">Выберите группы получателей</div>
+                    {tgGroups.length > 0 && (
+                      <button onClick={() => tgSelectedGroups.length === tgGroups.length ? setTgSelectedGroups([]) : setTgSelectedGroups(tgGroups.map((g) => g.id))}
+                        className="text-xs text-primary hover:underline">
+                        {tgSelectedGroups.length === tgGroups.length ? "Снять всё" : "Отметить всё"}
+                      </button>
+                    )}
+                  </div>
+                  {tgGroups.length === 0 ? (
+                    <div className="text-sm text-muted-foreground py-4 text-center">
+                      Нет групп. <button onClick={() => { setTab("connect"); setPlatform("telegram"); }} className="text-primary hover:underline">Подключите бота</button> и обновите список.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {tgGroups.map((g) => (
+                        <label key={g.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer border transition-all duration-150 ${tgSelectedGroups.includes(g.id) ? "border-primary/40 bg-primary/5" : "border-border hover:bg-secondary/40"}`}>
+                          <input type="checkbox" checked={tgSelectedGroups.includes(g.id)} onChange={() => setTgSelectedGroups((prev) => prev.includes(g.id) ? prev.filter((x) => x !== g.id) : [...prev, g.id])} className="w-4 h-4 accent-blue-500" />
+                          <Icon name="Send" size={14} className="text-muted-foreground shrink-0" />
+                          <span className="text-sm text-foreground font-medium flex-1">{g.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {tgSelectedGroups.length > 0 && (
+                    <div className="text-xs text-muted-foreground">Выбрано групп: <span className="text-foreground font-semibold">{tgSelectedGroups.length}</span></div>
                   )}
                 </div>
-                {groups.length === 0 ? (
-                  <div className="text-sm text-muted-foreground py-4 text-center">
-                    Нет групп. <button onClick={() => setTab("connect")} className="text-primary hover:underline">Подключите WhatsApp</button> и импортируйте группы.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {groups.filter((g) => g.active).map((g) => (
-                      <label key={g.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer border transition-all duration-150
-                        ${selectedGroups.includes(g.id) ? "border-primary/40 bg-primary/5" : "border-border hover:bg-secondary/40"}`}>
-                        <input type="checkbox" checked={selectedGroups.includes(g.id)} onChange={() => toggleGroupSelection(g.id)} className="w-4 h-4 accent-green-500" />
-                        <span className="text-sm text-foreground font-medium flex-1">{g.name}</span>
-                        <span className="text-xs text-muted-foreground">{g.members} участников</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${tagColors[g.tag] || ""}`}>{g.tag}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-                {selectedGroups.length > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    Выбрано групп: <span className="text-foreground font-semibold">{selectedGroups.length}</span> · Получателей:{" "}
-                    <span className="text-foreground font-semibold">
-                      {groups.filter((g) => selectedGroups.includes(g.id)).reduce((s, g) => s + g.members, 0)}
-                    </span>
-                  </div>
-                )}
-              </div>
+              )}
 
-
+              {/* WhatsApp / MAX — группы */}
+              {platform !== "telegram" && (
+                <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-foreground">Выберите группы получателей</div>
+                    {groups.filter((g) => g.active).length > 0 && (
+                      <button onClick={() => { const ids = groups.filter((g) => g.active).map((g) => g.id); setSelectedGroups(selectedGroups.length === ids.length ? [] : ids); }}
+                        className="text-xs text-primary hover:underline">
+                        {selectedGroups.length === groups.filter((g) => g.active).length ? "Снять всё" : "Отметить всё"}
+                      </button>
+                    )}
+                  </div>
+                  {groups.length === 0 ? (
+                    <div className="text-sm text-muted-foreground py-4 text-center">
+                      Нет групп. <button onClick={() => setTab("connect")} className="text-primary hover:underline">Подключите аккаунт</button> и импортируйте группы.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {groups.filter((g) => g.active).map((g) => (
+                        <label key={g.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer border transition-all duration-150 ${selectedGroups.includes(g.id) ? "border-primary/40 bg-primary/5" : "border-border hover:bg-secondary/40"}`}>
+                          <input type="checkbox" checked={selectedGroups.includes(g.id)} onChange={() => toggleGroupSelection(g.id)} className="w-4 h-4 accent-green-500" />
+                          <span className="text-sm text-foreground font-medium flex-1">{g.name}</span>
+                          <span className="text-xs text-muted-foreground">{g.members} участников</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${tagColors[g.tag] || ""}`}>{g.tag}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {selectedGroups.length > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      Выбрано групп: <span className="text-foreground font-semibold">{selectedGroups.length}</span> · Получателей:{" "}
+                      <span className="text-foreground font-semibold">{groups.filter((g) => selectedGroups.includes(g.id)).reduce((s, g) => s + g.members, 0)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

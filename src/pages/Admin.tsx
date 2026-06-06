@@ -21,7 +21,12 @@ function PasswordInput({ placeholder, value, onChange, onKeyDown }: {
   );
 }
 
-interface User { id: number; email: string; instance_id: string; instance_token: string; }
+interface User {
+  id: number; email: string;
+  instance_id: string; instance_token: string;
+  max_instance_id: string; max_instance_token: string;
+  telegram_bot_token: string;
+}
 
 export default function Admin() {
   const [adminSecret, setAdminSecret] = useState("");
@@ -39,7 +44,11 @@ export default function Admin() {
   const [resetingId, setResetingId] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [newPasswords, setNewPasswords] = useState<Record<number, string>>({});
-  const [editInstances, setEditInstances] = useState<Record<number, { id: string; token: string }>>({});
+  const [editInstances, setEditInstances] = useState<Record<number, {
+    id: string; token: string;
+    max_id: string; max_token: string;
+    tg_token: string;
+  }>>({});
 
   async function checkSecret() {
     if (!adminSecret.trim()) { setSecretError("Введите секретный ключ"); return; }
@@ -51,18 +60,20 @@ export default function Admin() {
     const data = await res.json();
     if (data.error) { setSecretError("Неверный ключ"); setLoadingUsers(false); return; }
     setUsers(data.users || []);
-    const inst: Record<number, { id: string; token: string }> = {};
-    (data.users || []).forEach((u: User) => { inst[u.id] = { id: u.instance_id || "", token: u.instance_token || "" }; });
+    const inst: Record<number, { id: string; token: string; max_id: string; max_token: string; tg_token: string }> = {};
+    (data.users || []).forEach((u: User) => {
+      inst[u.id] = { id: u.instance_id || "", token: u.instance_token || "", max_id: u.max_instance_id || "", max_token: u.max_instance_token || "", tg_token: u.telegram_bot_token || "" };
+    });
     setEditInstances(inst);
     setAuthed(true); setLoadingUsers(false);
   }
 
   async function saveInstance(userId: number, email: string) {
     setSavingId(userId);
-    const { id, token } = editInstances[userId] || { id: "", token: "" };
+    const { id, token, max_id, max_token, tg_token } = editInstances[userId] || { id: "", token: "", max_id: "", max_token: "", tg_token: "" };
     const res = await fetch(`${AUTH_URL}?action=set_instance`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, instance_id: id, instance_token: token, secret: adminSecret }),
+      body: JSON.stringify({ user_id: userId, instance_id: id, instance_token: token, max_instance_id: max_id, max_instance_token: max_token, telegram_bot_token: tg_token, secret: adminSecret }),
     });
     const data = await res.json();
     if (data.ok) {
@@ -217,15 +228,31 @@ export default function Admin() {
                   </div>
 
                   <div className="px-3 pb-2 space-y-2">
-                    <div className="text-xs text-muted-foreground">Green API инстанс</div>
-                    <Input placeholder="ID инстанса"
+                    <div className="text-xs font-medium text-muted-foreground">WhatsApp — Green API</div>
+                    <Input placeholder="ID инстанса WhatsApp"
                       value={editInstances[u.id]?.id || ""}
                       onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], id: e.target.value } }))}
                       className="font-mono text-xs h-8" />
+                    <Input placeholder="Токен инстанса WhatsApp"
+                      value={editInstances[u.id]?.token || ""}
+                      onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], token: e.target.value } }))}
+                      className="font-mono text-xs h-8" />
+
+                    <div className="text-xs font-medium text-muted-foreground pt-1">MAX — Green API</div>
+                    <Input placeholder="ID инстанса MAX"
+                      value={editInstances[u.id]?.max_id || ""}
+                      onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], max_id: e.target.value } }))}
+                      className="font-mono text-xs h-8" />
+                    <Input placeholder="Токен инстанса MAX"
+                      value={editInstances[u.id]?.max_token || ""}
+                      onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], max_token: e.target.value } }))}
+                      className="font-mono text-xs h-8" />
+
+                    <div className="text-xs font-medium text-muted-foreground pt-1">Telegram Bot</div>
                     <div className="flex items-center gap-2">
-                      <Input placeholder="Токен инстанса"
-                        value={editInstances[u.id]?.token || ""}
-                        onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], token: e.target.value } }))}
+                      <Input placeholder="Токен бота (от @BotFather)"
+                        value={editInstances[u.id]?.tg_token || ""}
+                        onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], tg_token: e.target.value } }))}
                         className="font-mono text-xs h-8" />
                       <button onClick={() => saveInstance(u.id, u.email)} disabled={savingId === u.id}
                         className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all disabled:opacity-40">

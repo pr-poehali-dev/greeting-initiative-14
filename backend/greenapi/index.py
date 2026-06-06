@@ -14,23 +14,26 @@ cors = {
 }
 
 
-def get_user_instance(session_id: str) -> tuple:
-    """Получает instance_id и token пользователя по session_id."""
+def get_user_instance(session_id: str, platform: str = "whatsapp") -> tuple:
+    """Получает instance_id и token пользователя по session_id и платформе."""
     if not session_id:
         return "", ""
     try:
         db = psycopg2.connect(os.environ["DATABASE_URL"])
         cur = db.cursor()
         cur.execute(f"""
-            SELECT u.green_api_instance_id, u.green_api_token
+            SELECT u.green_api_instance_id, u.green_api_token, u.max_api_instance_id, u.max_api_token
             FROM {SCHEMA}.sessions s
             JOIN {SCHEMA}.users u ON u.id = s.user_id
             WHERE s.id=%s AND s.expires_at > NOW()
         """, (session_id,))
         row = cur.fetchone()
         db.close()
-        if row and row[0] and row[1]:
-            return row[0].strip(), row[1].strip()
+        if row:
+            if platform == "max" and row[2] and row[3]:
+                return row[2].strip(), row[3].strip()
+            if platform != "max" and row[0] and row[1]:
+                return row[0].strip(), row[1].strip()
     except Exception as e:
         print(f"[greenapi] DB error: {e}")
     return "", ""
@@ -81,8 +84,9 @@ def handler(event: dict, context) -> dict:
     session_id = headers.get("X-Session-Id", "")
     params = event.get("queryStringParameters") or {}
     action = params.get("action", "status")
+    platform = params.get("platform", "whatsapp")
 
-    instance_id, token = get_user_instance(session_id)
+    instance_id, token = get_user_instance(session_id, platform)
 
     if not instance_id or not token:
         return {

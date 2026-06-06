@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "Статус без токена",
+      "method": "GET",
+      "path": "/?action=status",
+      "expectedStatus": 200,
+      "expectedBody": {"connected": false},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
