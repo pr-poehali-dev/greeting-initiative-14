@@ -5,6 +5,34 @@ import Icon from "@/components/ui/icon";
 
 const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338b69b";
 
+function PasswordInput({ placeholder, value, onChange, onKeyDown }: {
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  onKeyDown?: (e: React.KeyboardEvent) => void;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <Input
+        type={show ? "text" : "password"}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        className="pr-10"
+      />
+      <button
+        type="button"
+        onClick={() => setShow((v) => !v)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Icon name={show ? "EyeOff" : "Eye"} size={16} />
+      </button>
+    </div>
+  );
+}
+
 export default function Admin() {
   const [adminSecret, setAdminSecret] = useState("");
   const [authed, setAuthed] = useState(false);
@@ -114,11 +142,10 @@ export default function Admin() {
 
           <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
             <p className="text-sm text-muted-foreground text-center">Введите секретный ключ администратора</p>
-            <Input
-              type="password"
+            <PasswordInput
               placeholder="Секретный ключ"
               value={adminSecret}
-              onChange={(e) => setAdminSecret(e.target.value)}
+              onChange={setAdminSecret}
               onKeyDown={(e) => e.key === "Enter" && checkSecret()}
             />
             {secretError && (
@@ -157,11 +184,10 @@ export default function Admin() {
               value={login}
               onChange={(e) => setLogin(e.target.value)}
             />
-            <Input
-              type="password"
+            <PasswordInput
               placeholder="Пароль"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={setPassword}
               onKeyDown={(e) => e.key === "Enter" && createUser()}
             />
           </div>
@@ -205,13 +231,11 @@ export default function Admin() {
                     </button>
                   </div>
                   <div className="flex items-center gap-2 px-3 pb-2.5">
-                    <Input
-                      type="password"
+                    <PasswordInput
                       placeholder="Новый пароль"
                       value={newPasswords[u.id] || ""}
-                      onChange={(e) => setNewPasswords((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                      onChange={(v) => setNewPasswords((prev) => ({ ...prev, [u.id]: v }))}
                       onKeyDown={(e) => e.key === "Enter" && resetPassword(u.id, u.email)}
-                      className="h-7 text-xs"
                     />
                     <button
                       onClick={() => resetPassword(u.id, u.email)}
