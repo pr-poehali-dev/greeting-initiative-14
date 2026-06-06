@@ -3,14 +3,37 @@ import json
 import urllib.request
 import urllib.error
 import time
+import psycopg2
 
 WHAPI_BASE = "https://gate.whapi.cloud"
+SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p54486869_greeting_initiative_")
 
 cors = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
 }
+
+
+def get_user_token(session_id: str) -> str:
+    """Получает whapi_token пользователя по session_id."""
+    if not session_id:
+        return ""
+    try:
+        db = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = db.cursor()
+        cur.execute(f"""
+            SELECT u.whapi_token FROM {SCHEMA}.sessions s
+            JOIN {SCHEMA}.users u ON u.id = s.user_id
+            WHERE s.id=%s AND s.expires_at > NOW()
+        """, (session_id,))
+        row = cur.fetchone()
+        db.close()
+        if row and row[0]:
+            return row[0].strip()
+    except Exception as e:
+        print(f"[send] DB error: {e}")
+    return ""
 
 
 def send_message(token: str, group_id: str, text: str) -> dict:
@@ -42,16 +65,18 @@ def send_message(token: str, group_id: str, text: str) -> dict:
 
 
 def handler(event: dict, context) -> dict:
-    """Отправка текстового сообщения в выбранные группы WhatsApp через Whapi. Пакетная отправка по 10 групп."""
+    """Отправка текстового сообщения в группы WhatsApp. Токен берётся из профиля пользователя."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors, "body": ""}
 
-    token = os.environ.get("WHAPI_TOKEN", "")
+    session_id = (event.get("headers") or {}).get("X-Session-Id", "")
+    token = get_user_token(session_id)
+
     if not token:
         return {
             "statusCode": 200,
             "headers": {**cors, "Content-Type": "application/json"},
-            "body": json.dumps({"error": "WHAPI_TOKEN не настроен"}),
+            "body": json.dumps({"error": "Токен Whapi не назначен. Обратитесь к администратору."}),
         }
 
     body = {}
@@ -65,23 +90,14 @@ def handler(event: dict, context) -> dict:
     group_ids = body.get("group_ids", [])
 
     if not text:
-        return {
-            "statusCode": 400,
-            "headers": {**cors, "Content-Type": "application/json"},
-            "body": json.dumps({"error": "Текст сообщения обязателен"}),
-        }
+        return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"}, "body": json.dumps({"error": "Текст сообщения обязателен"})}
     if not group_ids:
-        return {
-            "statusCode": 400,
-            "headers": {**cors, "Content-Type": "application/json"},
-            "body": json.dumps({"error": "Выберите хотя бы одну группу"}),
-        }
+        return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"}, "body": json.dumps({"error": "Выберите хотя бы одну группу"})}
 
     results = []
     for i, group_id in enumerate(group_ids):
         result = send_message(token, group_id, text)
         results.append(result)
-        # Небольшая пауза только между группами, не после последней
         if i < len(group_ids) - 1:
             time.sleep(0.5)
 
@@ -91,10 +107,5 @@ def handler(event: dict, context) -> dict:
     return {
         "statusCode": 200,
         "headers": {**cors, "Content-Type": "application/json"},
-        "body": json.dumps({
-            "sent": sent,
-            "failed": failed,
-            "total": len(results),
-            "results": results,
-        }),
+        "body": json.dumps({"sent": sent, "failed": failed, "total": len(results), "results": results}),
     }

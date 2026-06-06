@@ -1,0 +1,1 @@
+ALTER TABLE t_p54486869_greeting_initiative_.users ADD COLUMN IF NOT EXISTS whapi_token VARCHAR(500) DEFAULT '';

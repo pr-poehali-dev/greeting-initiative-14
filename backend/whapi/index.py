@@ -3,12 +3,35 @@ import json
 import urllib.request
 import urllib.error
 import base64
+import psycopg2
 
 WHAPI_BASE = "https://gate.whapi.cloud"
+SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p54486869_greeting_initiative_")
+
+
+def get_user_token(session_id: str) -> str:
+    """Получает whapi_token пользователя по session_id."""
+    if not session_id:
+        return ""
+    try:
+        db = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = db.cursor()
+        cur.execute(f"""
+            SELECT u.whapi_token FROM {SCHEMA}.sessions s
+            JOIN {SCHEMA}.users u ON u.id = s.user_id
+            WHERE s.id=%s AND s.expires_at > NOW()
+        """, (session_id,))
+        row = cur.fetchone()
+        db.close()
+        if row and row[0]:
+            return row[0].strip()
+    except Exception as e:
+        print(f"[whapi] DB error: {e}")
+    return ""
 
 
 def _req(path: str, token: str, method: str = "GET", accept: str = "application/json") -> tuple:
-    """HTTP-запрос к Whapi. Возвращает (ok: bool, data)."""
+    """HTTP-запрос к Whapi."""
     url = f"{WHAPI_BASE}{path}"
     req = urllib.request.Request(
         url,
@@ -36,7 +59,7 @@ def _req(path: str, token: str, method: str = "GET", accept: str = "application/
 
 
 def handler(event: dict, context) -> dict:
-    """Интеграция с Whapi.cloud: QR-код, статус и группы WhatsApp. Один глобальный токен на всех пользователей."""
+    """Интеграция с Whapi.cloud. Токен берётся из профиля пользователя по сессии."""
     cors = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -46,16 +69,18 @@ def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors, "body": ""}
 
-    token = os.environ.get("WHAPI_TOKEN", "")
+    headers = event.get("headers") or {}
+    session_id = headers.get("X-Session-Id", "")
+    params = event.get("queryStringParameters") or {}
+    action = params.get("action", "status")
+
+    token = get_user_token(session_id)
     if not token:
         return {
             "statusCode": 200,
             "headers": {**cors, "Content-Type": "application/json"},
-            "body": json.dumps({"error": "no_token", "message": "WHAPI_TOKEN не настроен"}),
+            "body": json.dumps({"error": "no_token", "message": "Токен Whapi не назначен. Обратитесь к администратору."}),
         }
-
-    params = event.get("queryStringParameters") or {}
-    action = params.get("action", "status")
 
     if action == "qr":
         ok, health = _req("/checkHealth", token)
@@ -70,7 +95,6 @@ def handler(event: dict, context) -> dict:
                 }
 
         ok_img, img_data = _req("/users/login", token, accept="image/png")
-        print(f"[whapi] /users/login (image/png) ok={ok_img} len={len(img_data) if isinstance(img_data, bytes) else 'n/a'}")
         if ok_img and isinstance(img_data, bytes) and len(img_data) > 100:
             qr_b64 = base64.b64encode(img_data).decode()
             return {
@@ -108,7 +132,6 @@ def handler(event: dict, context) -> dict:
 
     if action == "status":
         ok, data = _req("/checkHealth", token)
-        print(f"[whapi] /checkHealth ok={ok} data={json.dumps(data)[:300]}")
         ch_status = str(data.get("accountStatus") or data.get("deviceStatus") or "unknown").lower() if ok else "error"
         connected = ch_status in ("authenticated", "active", "connected", "ok", "ready")
         return {
@@ -149,5 +172,5 @@ def handler(event: dict, context) -> dict:
     return {
         "statusCode": 400,
         "headers": {**cors, "Content-Type": "application/json"},
-        "body": json.dumps({"error": "Unknown action. Use: qr | status | groups"}),
+        "body": json.dumps({"error": "Unknown action"}),
     }
