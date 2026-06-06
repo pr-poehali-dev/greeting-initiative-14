@@ -123,8 +123,13 @@ def handler(event: dict, context) -> dict:
         }
 
     if action == "groups":
-        ok, data = _get("/groups")
-        print(f"[whapi] /groups ok={ok} keys={list(data.keys()) if ok else data}")
+        # Пробуем несколько вариантов URL
+        ok, data = False, {}
+        for path in ["/groups?count=100", "/groups?limit=100", "/groups"]:
+            ok, data = _get(path)
+            print(f"[whapi] {path} ok={ok} data={json.dumps(data)[:200]}")
+            if ok:
+                break
         if not ok:
             return {
                 "statusCode": 200,
