@@ -17,6 +17,7 @@ export default function Admin() {
 
   const [users, setUsers] = useState<{ id: number; email: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   async function checkSecret() {
     if (!adminSecret.trim()) { setSecretError("Введите секретный ключ"); return; }
@@ -36,6 +37,21 @@ export default function Admin() {
     setUsers(data.users || []);
     setAuthed(true);
     setLoadingUsers(false);
+  }
+
+  async function deleteUser(userId: number, email: string) {
+    if (!confirm(`Удалить пользователя «${email}»?`)) return;
+    setDeletingId(userId);
+    const res = await fetch(`${AUTH_URL}?action=delete_user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, secret: adminSecret }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+    }
+    setDeletingId(null);
   }
 
   async function createUser() {
@@ -157,7 +173,14 @@ export default function Admin() {
                     <Icon name="User" size={13} className="text-primary" />
                   </div>
                   <div className="text-sm text-foreground">{u.email}</div>
-                  <div className="ml-auto text-xs text-muted-foreground">#{u.id}</div>
+                  <div className="text-xs text-muted-foreground">#{u.id}</div>
+                  <button
+                    onClick={() => deleteUser(u.id, u.email)}
+                    disabled={deletingId === u.id}
+                    className="ml-auto p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-40"
+                  >
+                    <Icon name="Trash2" size={13} />
+                  </button>
                 </div>
               ))}
             </div>

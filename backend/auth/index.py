@@ -68,6 +68,18 @@ def handler(event: dict, context) -> dict:
                 return json_response({"error": "Email уже существует"}, 400)
             return json_response({"error": str(e)}, 500)
 
+    if action == "delete_user":
+        secret = body.get("secret", "")
+        if secret != os.environ.get("ADMIN_SECRET", ""):
+            return json_response({"error": "Forbidden"}, 403)
+        user_id = body.get("user_id")
+        if not user_id:
+            return json_response({"error": "user_id обязателен"}, 400)
+        cur.execute(f"UPDATE {SCHEMA}.sessions SET expires_at=NOW() WHERE user_id=%s", (user_id,))
+        cur.execute(f"UPDATE {SCHEMA}.users SET password_hash='DELETED', email=email || '__deleted_' || id WHERE id=%s", (user_id,))
+        db.commit()
+        return json_response({"ok": True})
+
     if action == "login":
         email = body.get("email", "").strip().lower()
         password = body.get("password", "")
