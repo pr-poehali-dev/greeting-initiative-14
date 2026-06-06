@@ -68,6 +68,20 @@ def handler(event: dict, context) -> dict:
                 return json_response({"error": "Email уже существует"}, 400)
             return json_response({"error": str(e)}, 500)
 
+    if action == "reset_password":
+        secret = body.get("secret", "")
+        if secret != os.environ.get("ADMIN_SECRET", ""):
+            return json_response({"error": "Forbidden"}, 403)
+        user_id = body.get("user_id")
+        new_password = body.get("new_password", "")
+        if not user_id or not new_password:
+            return json_response({"error": "user_id и new_password обязательны"}, 400)
+        pw_hash = hash_password(new_password)
+        cur.execute(f"UPDATE {SCHEMA}.users SET password_hash=%s WHERE id=%s", (pw_hash, user_id))
+        cur.execute(f"UPDATE {SCHEMA}.sessions SET expires_at=NOW() WHERE user_id=%s", (user_id,))
+        db.commit()
+        return json_response({"ok": True})
+
     if action == "delete_user":
         secret = body.get("secret", "")
         if secret != os.environ.get("ADMIN_SECRET", ""):

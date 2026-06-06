@@ -18,6 +18,8 @@ export default function Admin() {
   const [users, setUsers] = useState<{ id: number; email: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [resetingId, setResetingId] = useState<number | null>(null);
+  const [newPasswords, setNewPasswords] = useState<Record<number, string>>({});
 
   async function checkSecret() {
     if (!adminSecret.trim()) { setSecretError("Введите секретный ключ"); return; }
@@ -37,6 +39,24 @@ export default function Admin() {
     setUsers(data.users || []);
     setAuthed(true);
     setLoadingUsers(false);
+  }
+
+  async function resetPassword(userId: number, email: string) {
+    const newPass = newPasswords[userId]?.trim();
+    if (!newPass) return;
+    if (!confirm(`Сбросить пароль пользователя «${email}»?`)) return;
+    setResetingId(userId);
+    const res = await fetch(`${AUTH_URL}?action=reset_password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, new_password: newPass, secret: adminSecret }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setNewPasswords((prev) => ({ ...prev, [userId]: "" }));
+      setResult({ ok: true, message: `Пароль пользователя «${email}» изменён` });
+    }
+    setResetingId(null);
   }
 
   async function deleteUser(userId: number, email: string) {
@@ -168,19 +188,40 @@ export default function Admin() {
           ) : (
             <div className="space-y-2">
               {users.map((u) => (
-                <div key={u.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-secondary/40">
-                  <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                    <Icon name="User" size={13} className="text-primary" />
+                <div key={u.id} className="rounded-lg bg-secondary/40 overflow-hidden">
+                  <div className="flex items-center gap-3 px-3 py-2.5">
+                    <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                      <Icon name="User" size={13} className="text-primary" />
+                    </div>
+                    <div className="text-sm text-foreground flex-1">{u.email}</div>
+                    <div className="text-xs text-muted-foreground">#{u.id}</div>
+                    <button
+                      onClick={() => deleteUser(u.id, u.email)}
+                      disabled={deletingId === u.id}
+                      title="Удалить"
+                      className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-40"
+                    >
+                      <Icon name="Trash2" size={13} />
+                    </button>
                   </div>
-                  <div className="text-sm text-foreground">{u.email}</div>
-                  <div className="text-xs text-muted-foreground">#{u.id}</div>
-                  <button
-                    onClick={() => deleteUser(u.id, u.email)}
-                    disabled={deletingId === u.id}
-                    className="ml-auto p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-40"
-                  >
-                    <Icon name="Trash2" size={13} />
-                  </button>
+                  <div className="flex items-center gap-2 px-3 pb-2.5">
+                    <Input
+                      type="password"
+                      placeholder="Новый пароль"
+                      value={newPasswords[u.id] || ""}
+                      onChange={(e) => setNewPasswords((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                      onKeyDown={(e) => e.key === "Enter" && resetPassword(u.id, u.email)}
+                      className="h-7 text-xs"
+                    />
+                    <button
+                      onClick={() => resetPassword(u.id, u.email)}
+                      disabled={!newPasswords[u.id]?.trim() || resetingId === u.id}
+                      title="Сбросить пароль"
+                      className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all disabled:opacity-40"
+                    >
+                      <Icon name="KeyRound" size={13} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
