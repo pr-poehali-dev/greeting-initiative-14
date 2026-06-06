@@ -15,7 +15,6 @@ const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338
 function AppRoutes() {
   const [sessionId, setSessionId] = useState<string>(() => localStorage.getItem("session_id") || "");
   const [userEmail, setUserEmail] = useState<string>(() => localStorage.getItem("user_email") || "");
-  const [whapiToken, setWhapiToken] = useState<string>("");
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -31,17 +30,15 @@ function AppRoutes() {
         } else {
           setSessionId(sid);
           setUserEmail(data.email);
-          setWhapiToken(data.whapi_token || "");
         }
       })
       .catch(() => {})
       .finally(() => setChecking(false));
   }, []);
 
-  function handleLogin(sid: string, email: string, token: string) {
+  function handleLogin(sid: string, email: string) {
     setSessionId(sid);
     setUserEmail(email);
-    setWhapiToken(token);
   }
 
   function handleLogout() {
@@ -51,7 +48,6 @@ function AppRoutes() {
     localStorage.removeItem("user_email");
     setSessionId("");
     setUserEmail("");
-    setWhapiToken("");
   }
 
   if (checking) {
@@ -73,8 +69,6 @@ function AppRoutes() {
           <Index
             sessionId={sessionId}
             userEmail={userEmail}
-            whapiToken={whapiToken}
-            onWhapiTokenChange={setWhapiToken}
             onLogout={handleLogout}
           />
         } />

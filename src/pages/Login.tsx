@@ -6,11 +6,10 @@ import Icon from "@/components/ui/icon";
 const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338b69b";
 
 interface LoginProps {
-  onLogin: (sessionId: string, email: string, whapiToken: string) => void;
+  onLogin: (sessionId: string, email: string) => void;
 }
 
 export default function Login({ onLogin }: LoginProps) {
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -24,7 +23,7 @@ export default function Login({ onLogin }: LoginProps) {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${AUTH_URL}?action=${mode}`, {
+      const res = await fetch(`${AUTH_URL}?action=login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
@@ -36,7 +35,7 @@ export default function Login({ onLogin }: LoginProps) {
       }
       localStorage.setItem("session_id", data.session_id);
       localStorage.setItem("user_email", data.email);
-      onLogin(data.session_id, data.email, data.whapi_token || "");
+      onLogin(data.session_id, data.email);
     } catch {
       setError("Ошибка соединения. Попробуйте ещё раз.");
     } finally {
@@ -59,12 +58,8 @@ export default function Login({ onLogin }: LoginProps) {
 
         <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
           <div className="text-center">
-            <h2 className="text-base font-semibold text-foreground">
-              {mode === "login" ? "Вход в систему" : "Регистрация"}
-            </h2>
-            <p className="text-xs text-muted-foreground mt-1">
-              {mode === "login" ? "Введите email и пароль" : "Создайте новый аккаунт"}
-            </p>
+            <h2 className="text-base font-semibold text-foreground">Вход в систему</h2>
+            <p className="text-xs text-muted-foreground mt-1">Введите логин и пароль</p>
           </div>
 
           <div className="space-y-3">
@@ -91,24 +86,8 @@ export default function Login({ onLogin }: LoginProps) {
           )}
 
           <Button className="w-full" onClick={submit} disabled={loading}>
-            {loading ? "Загрузка..." : mode === "login" ? "Войти" : "Зарегистрироваться"}
+            {loading ? "Загрузка..." : "Войти"}
           </Button>
-
-          <div className="text-center text-xs text-muted-foreground">
-            {mode === "login" ? (
-              <>Нет аккаунта?{" "}
-                <button onClick={() => { setMode("register"); setError(""); }} className="text-primary hover:underline">
-                  Зарегистрироваться
-                </button>
-              </>
-            ) : (
-              <>Уже есть аккаунт?{" "}
-                <button onClick={() => { setMode("login"); setError(""); }} className="text-primary hover:underline">
-                  Войти
-                </button>
-              </>
-            )}
-          </div>
         </div>
       </div>
     </div>

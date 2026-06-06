@@ -8,14 +8,12 @@ import { Switch } from "@/components/ui/switch";
 const WHAPI_URL = "https://functions.poehali.dev/f6a3c6b6-03f7-4150-b586-7cf660c83ced";
 const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338b69b";
 
-type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect" | "settings";
+type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect";
 type WaStatus = "disconnected" | "loading" | "qr" | "connected";
 
 interface IndexProps {
   sessionId: string;
   userEmail: string;
-  whapiToken: string;
-  onWhapiTokenChange: (token: string) => void;
   onLogout: () => void;
 }
 
@@ -55,11 +53,8 @@ const tagColors: Record<string, string> = {
   WhatsApp: "bg-primary/15 text-primary border-primary/30",
 };
 
-const Index = ({ sessionId, userEmail, whapiToken, onWhapiTokenChange, onLogout }: IndexProps) => {
+const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [tab, setTab] = useState<Tab>("dashboard");
-  const [tokenInput, setTokenInput] = useState(whapiToken);
-  const [savingToken, setSavingToken] = useState(false);
-  const [tokenSaved, setTokenSaved] = useState(false);
   const [botActive, setBotActive] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [broadcastText, setBroadcastText] = useState("");
@@ -83,29 +78,11 @@ const Index = ({ sessionId, userEmail, whapiToken, onWhapiTokenChange, onLogout 
     { id: "groups", label: "Группы", icon: "Users" },
     { id: "contacts", label: "Контакты", icon: "ContactRound" },
     { id: "broadcast", label: "Рассылка", icon: "Send" },
-    { id: "settings", label: "Настройки", icon: "Settings" },
   ];
 
   const totalMembers = groups.filter((g) => g.active).reduce((s, g) => s + g.members, 0);
 
   const whapiHeaders = { "X-Session-Id": sessionId };
-
-  async function saveToken() {
-    setSavingToken(true);
-    setTokenSaved(false);
-    try {
-      await fetch(`${AUTH_URL}?action=update_token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
-        body: JSON.stringify({ whapi_token: tokenInput }),
-      });
-      onWhapiTokenChange(tokenInput);
-      setTokenSaved(true);
-      setTimeout(() => setTokenSaved(false), 3000);
-    } finally {
-      setSavingToken(false);
-    }
-  }
 
   // Polling for QR / connection status
   useEffect(() => {
@@ -727,59 +704,7 @@ const Index = ({ sessionId, userEmail, whapiToken, onWhapiTokenChange, onLogout 
             </div>
           )}
 
-          {/* ── SETTINGS ── */}
-          {tab === "settings" && (
-            <div className="max-w-lg space-y-6">
-              <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                    <Icon name="User" size={15} className="text-primary" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-foreground">Аккаунт</div>
-                    <div className="text-xs text-muted-foreground">{userEmail}</div>
-                  </div>
-                </div>
-              </div>
 
-              <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                <div className="text-sm font-semibold text-foreground">Whapi токен</div>
-                <p className="text-xs text-muted-foreground">
-                  Получите токен на{" "}
-                  <a href="https://whapi.cloud" target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                    whapi.cloud
-                  </a>{" "}
-                  → Каналы → выберите канал → скопируйте токен.
-                </p>
-                <Input
-                  placeholder="Вставьте токен Whapi..."
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  className="font-mono text-xs"
-                />
-                <div className="flex items-center gap-3">
-                  <Button onClick={saveToken} disabled={savingToken} className="gap-2">
-                    <Icon name="Save" size={14} />
-                    {savingToken ? "Сохраняю..." : "Сохранить"}
-                  </Button>
-                  {tokenSaved && (
-                    <span className="text-xs text-primary flex items-center gap-1">
-                      <Icon name="CheckCircle" size={13} /> Сохранено
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-6 space-y-3">
-                <div className="text-sm font-semibold text-foreground">Выход из аккаунта</div>
-                <p className="text-xs text-muted-foreground">Вы выйдете из системы. WhatsApp останется подключён.</p>
-                <Button variant="outline" onClick={onLogout} className="gap-2 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-400">
-                  <Icon name="LogOut" size={14} />
-                  Выйти
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
       </main>
     </div>

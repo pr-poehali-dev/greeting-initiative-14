@@ -1,12 +1,12 @@
 {
   "tests": [
     {
-      "name": "Регистрация пользователя",
+      "name": "Вход с неверным паролем",
       "method": "POST",
-      "path": "/?action=register",
-      "body": {"email": "test@test.com", "password": "test123"},
-      "expectedStatus": 200,
-      "expectedBody": {"session_id": "string"},
+      "path": "/?action=login",
+      "body": {"email": "nobody@test.com", "password": "wrong"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
     }
   ]
