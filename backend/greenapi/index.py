@@ -37,19 +37,22 @@ def get_user_instance(session_id: str) -> tuple:
 
 
 def api_get(instance_id: str, token: str, method: str) -> tuple:
-    """GET запрос к Green API."""
+    """GET запрос к Green API с повторной попыткой."""
     url = f"{BASE_URL}/waInstance{instance_id}/{method}/{token}"
-    req = urllib.request.Request(url, method="GET", headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return True, json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        print(f"[greenapi] HTTP {e.code} {method}: {body[:200]}")
-        return False, {"http_status": e.code, "body": body}
-    except Exception as ex:
-        print(f"[greenapi] Exception {method}: {ex}")
-        return False, {"exception": str(ex)}
+    for attempt in range(2):
+        req = urllib.request.Request(url, method="GET", headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                return True, json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            body = e.read().decode()
+            print(f"[greenapi] HTTP {e.code} {method}: {body[:200]}")
+            return False, {"http_status": e.code, "body": body}
+        except Exception as ex:
+            print(f"[greenapi] attempt {attempt+1} {method}: {ex}")
+            if attempt == 1:
+                return False, {"exception": str(ex)}
+    return False, {"exception": "failed after retries"}
 
 
 def api_post(instance_id: str, token: str, method: str, data: dict) -> tuple:
