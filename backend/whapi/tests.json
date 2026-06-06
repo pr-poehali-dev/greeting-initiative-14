@@ -1,0 +1,20 @@
+{
+  "tests": [
+    {
+      "name": "QR-код для авторизации",
+      "method": "GET",
+      "path": "/?action=qr",
+      "expectedStatus": 200,
+      "expectedBody": {"raw": {}},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Список групп WhatsApp",
+      "method": "GET",
+      "path": "/?action=groups",
+      "expectedStatus": 200,
+      "expectedBody": {"groups": [], "total": 0},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
