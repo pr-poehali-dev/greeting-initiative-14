@@ -44,8 +44,24 @@ def handler(event: dict, context) -> dict:
     action = params.get("action", "status")
 
     if action == "qr":
-        data = _whapi_request("GET", "/screen")
-        qr_code = data.get("qr_code") or data.get("qrCode") or data.get("qr")
+        # Сначала проверяем статус канала
+        status_data = _whapi_request("GET", "/users/app/status")
+        print(f"[whapi] /users/app/status keys={list(status_data.keys())} data={json.dumps(status_data)[:200]}")
+
+        app_status = str(status_data.get("accountStatus") or status_data.get("status") or "").lower()
+        already_auth = app_status in ("authenticated", "active", "connected", "ok", "ready")
+
+        if already_auth:
+            return {
+                "statusCode": 200,
+                "headers": {**cors, "Content-Type": "application/json"},
+                "body": json.dumps({"qr_code": None, "already_connected": True, "raw": status_data}),
+            }
+
+        # Запрашиваем QR-код
+        data = _whapi_request("POST", "/users/login")
+        print(f"[whapi] /users/login keys={list(data.keys())} data={json.dumps(data)[:300]}")
+        qr_code = data.get("qr_code") or data.get("qrCode") or data.get("qr") or data.get("qrImage")
         mime = data.get("mime_type", "image/png")
         return {
             "statusCode": 200,
@@ -53,17 +69,20 @@ def handler(event: dict, context) -> dict:
             "body": json.dumps({
                 "qr_code": qr_code,
                 "mime_type": mime,
+                "already_connected": False,
                 "raw": data,
             }),
         }
 
     if action == "status":
-        data = _whapi_request("GET", "/health")
-        status = data.get("status", data.get("accountStatus", "unknown"))
+        data = _whapi_request("GET", "/users/app/status")
+        print(f"[whapi] status keys={list(data.keys())} data={json.dumps(data)[:200]}")
+        app_status = str(data.get("accountStatus") or data.get("status") or "unknown").lower()
+        connected = app_status in ("authenticated", "active", "connected", "ok", "ready")
         return {
             "statusCode": 200,
             "headers": {**cors, "Content-Type": "application/json"},
-            "body": json.dumps({"status": status, "raw": data}),
+            "body": json.dumps({"status": app_status, "connected": connected, "raw": data}),
         }
 
     if action == "groups":

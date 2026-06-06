@@ -104,18 +104,25 @@ const Index = () => {
       const res = await fetch(`${WHAPI_URL}?action=qr`);
       const data = await res.json();
       const qr = data.qr_code;
+      // Уже авторизован — QR не нужен
+      if (data.already_connected) {
+        setWaStatus("connected");
+        setBotActive(true);
+        fetchWaGroups();
+        return;
+      }
       if (qr) {
         setQrImage(qr.startsWith("data:") ? qr : `data:${data.mime_type || "image/png"};base64,${qr}`);
         setWaStatus("qr");
       } else {
-        // May already be connected
-        const st = (data.raw?.status || "").toLowerCase();
-        if (st === "authenticated" || st === "active" || st === "connected") {
+        // Дополнительная проверка статуса в raw
+        const st = (data.raw?.status || data.raw?.accountStatus || "").toLowerCase();
+        if (["authenticated", "active", "connected", "ok"].includes(st)) {
           setWaStatus("connected");
           setBotActive(true);
           fetchWaGroups();
         } else {
-          setQrError("QR-код недоступен. Проверьте токен Whapi в настройках.");
+          setQrError(`QR-код недоступен. Ответ сервера: ${st || "нет данных"}. Проверьте токен Whapi.`);
           setWaStatus("disconnected");
         }
       }
