@@ -123,7 +123,8 @@ def handler(event: dict, context) -> dict:
         }
 
     if action == "groups":
-        ok, data = _get("/groups?count=100")
+        ok, data = _get("/groups")
+        print(f"[whapi] /groups ok={ok} keys={list(data.keys()) if ok else data}")
         if not ok:
             return {
                 "statusCode": 200,
