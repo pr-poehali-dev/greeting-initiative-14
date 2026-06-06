@@ -2,30 +2,38 @@ import os
 import json
 import urllib.request
 import urllib.error
+import base64
 
 WHAPI_BASE = "https://gate.whapi.cloud"
 
 
-def _whapi_request(method: str, path: str, body: dict = None) -> dict:
+def _get(path: str, accept: str = "application/json") -> tuple:
+    """Возвращает (ok: bool, data: dict | bytes)"""
     token = os.environ.get("WHAPI_TOKEN", "")
     url = f"{WHAPI_BASE}{path}"
-    data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(
         url,
-        data=data,
-        method=method,
+        method="GET",
         headers={
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": accept,
             "User-Agent": "Mozilla/5.0 (compatible; WhapiClient/1.0)",
         },
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
-            return json.loads(resp.read().decode())
+            raw = resp.read()
+            if accept == "application/json":
+                return True, json.loads(raw.decode())
+            else:
+                return True, raw
     except urllib.error.HTTPError as e:
-        return {"error": e.reason, "status": e.code, "body": e.read().decode()}
+        body = e.read().decode()
+        print(f"[whapi] HTTP {e.code} on {path}: {body[:200]}")
+        return False, {"http_status": e.code, "reason": e.reason, "body": body}
+    except Exception as ex:
+        print(f"[whapi] Exception on {path}: {ex}")
+        return False, {"exception": str(ex)}
 
 
 def handler(event: dict, context) -> dict:
@@ -39,61 +47,95 @@ def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors, "body": ""}
 
-    method = event.get("httpMethod", "GET")
     params = event.get("queryStringParameters") or {}
     action = params.get("action", "status")
 
     if action == "qr":
-        # Сначала проверяем статус канала
-        status_data = _whapi_request("GET", "/users/app/status")
-        print(f"[whapi] /users/app/status keys={list(status_data.keys())} data={json.dumps(status_data)[:200]}")
+        # Сначала статус — вдруг уже авторизован
+        ok, health = _get("/checkHealth")
+        print(f"[whapi] /checkHealth ok={ok} data={json.dumps(health)[:300]}")
+        if ok:
+            ch_status = str(health.get("accountStatus") or health.get("deviceStatus") or "").lower()
+            if ch_status in ("authenticated", "active", "connected", "ok", "ready"):
+                return {
+                    "statusCode": 200,
+                    "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"qr_code": None, "already_connected": True, "status": ch_status}),
+                }
 
-        app_status = str(status_data.get("accountStatus") or status_data.get("status") or "").lower()
-        already_auth = app_status in ("authenticated", "active", "connected", "ok", "ready")
-
-        if already_auth:
+        # Запрашиваем QR как PNG-изображение
+        ok_img, img_data = _get("/users/login", accept="image/png")
+        print(f"[whapi] /users/login (image/png) ok={ok_img} type={type(img_data).__name__} len={len(img_data) if isinstance(img_data, bytes) else 'n/a'}")
+        if ok_img and isinstance(img_data, bytes) and len(img_data) > 100:
+            qr_b64 = base64.b64encode(img_data).decode()
             return {
                 "statusCode": 200,
                 "headers": {**cors, "Content-Type": "application/json"},
-                "body": json.dumps({"qr_code": None, "already_connected": True, "raw": status_data}),
+                "body": json.dumps({
+                    "qr_code": f"data:image/png;base64,{qr_b64}",
+                    "already_connected": False,
+                }),
             }
 
-        # Запрашиваем QR-код
-        data = _whapi_request("POST", "/users/login")
-        print(f"[whapi] /users/login keys={list(data.keys())} data={json.dumps(data)[:300]}")
-        qr_code = data.get("qr_code") or data.get("qrCode") or data.get("qr") or data.get("qrImage")
-        mime = data.get("mime_type", "image/png")
+        # Запрашиваем QR как base64 JSON
+        ok_json, qr_data = _get("/users/login", accept="application/json")
+        print(f"[whapi] /users/login (json) ok={ok_json} data={json.dumps(qr_data)[:300]}")
+
+        # 409 = канал уже авторизован
+        if not ok_json and isinstance(qr_data, dict) and qr_data.get("http_status") == 409:
+            return {
+                "statusCode": 200,
+                "headers": {**cors, "Content-Type": "application/json"},
+                "body": json.dumps({"qr_code": None, "already_connected": True, "status": "authenticated"}),
+            }
+
+        if ok_json and isinstance(qr_data, dict):
+            qr = qr_data.get("qr_code") or qr_data.get("qrCode") or qr_data.get("qr") or qr_data.get("image")
+            if qr:
+                if not qr.startswith("data:"):
+                    qr = f"data:image/png;base64,{qr}"
+                return {
+                    "statusCode": 200,
+                    "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"qr_code": qr, "already_connected": False}),
+                }
+
         return {
             "statusCode": 200,
             "headers": {**cors, "Content-Type": "application/json"},
             "body": json.dumps({
-                "qr_code": qr_code,
-                "mime_type": mime,
+                "qr_code": None,
                 "already_connected": False,
-                "raw": data,
+                "error": "Не удалось получить QR. Проверьте, что канал Whapi создан и токен верный.",
+                "debug_qr": qr_data if not ok_img else None,
             }),
         }
 
     if action == "status":
-        data = _whapi_request("GET", "/users/app/status")
-        print(f"[whapi] status keys={list(data.keys())} data={json.dumps(data)[:200]}")
-        app_status = str(data.get("accountStatus") or data.get("status") or "unknown").lower()
-        connected = app_status in ("authenticated", "active", "connected", "ok", "ready")
+        ok, data = _get("/checkHealth")
+        print(f"[whapi] /checkHealth ok={ok} data={json.dumps(data)[:300]}")
+        ch_status = str(data.get("accountStatus") or data.get("deviceStatus") or "unknown").lower() if ok else "error"
+        connected = ch_status in ("authenticated", "active", "connected", "ok", "ready")
         return {
             "statusCode": 200,
             "headers": {**cors, "Content-Type": "application/json"},
-            "body": json.dumps({"status": app_status, "connected": connected, "raw": data}),
+            "body": json.dumps({"status": ch_status, "connected": connected, "raw": data}),
         }
 
     if action == "groups":
-        data = _whapi_request("GET", "/groups?count=100")
+        ok, data = _get("/groups?count=100")
+        if not ok:
+            return {
+                "statusCode": 200,
+                "headers": {**cors, "Content-Type": "application/json"},
+                "body": json.dumps({"groups": [], "total": 0, "error": data}),
+            }
         groups = data.get("groups", data.get("chats", []))
         result = [
             {
                 "id": g.get("id", ""),
                 "name": g.get("name", g.get("subject", "")),
                 "members": g.get("participants_count", g.get("size", 0)),
-                "creation": g.get("creation", 0),
             }
             for g in groups
             if g.get("id", "").endswith("@g.us")
