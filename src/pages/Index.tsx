@@ -10,7 +10,7 @@ const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338
 const SEND_URL = "https://functions.poehali.dev/3c368aad-a7c2-4a91-9095-ac1a47fe77c9";
 const TELEGRAM_URL = "https://functions.poehali.dev/97d4798c-1a93-44d3-9fdc-40acf141a66b";
 
-type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect";
+type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect" | "help";
 type WaStatus = "disconnected" | "loading" | "qr" | "connected";
 type Platform = "whatsapp" | "max" | "telegram";
 
@@ -93,6 +93,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     { id: "groups", label: "Группы", icon: "Users" },
     { id: "contacts", label: "Контакты", icon: "ContactRound" },
     { id: "broadcast", label: "Рассылка", icon: "Send" },
+    { id: "help", label: "Инструкция", icon: "BookOpen" },
   ];
 
   const totalMembers = groups.filter((g) => g.active).reduce((s, g) => s + g.members, 0);
@@ -1069,6 +1070,165 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
             </div>
           )}
 
+          {/* ── HELP ── */}
+          {tab === "help" && (
+            <div className="max-w-3xl space-y-8">
+
+              {/* Заголовок */}
+              <div className="rounded-xl border border-primary/30 bg-primary/5 px-6 py-5 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0">
+                  <Icon name="BookOpen" size={24} className="text-primary" />
+                </div>
+                <div>
+                  <div className="text-lg font-bold text-foreground">Инструкция по использованию</div>
+                  <div className="text-sm text-muted-foreground mt-0.5">Пошаговое руководство — от подключения до отправки рассылки</div>
+                </div>
+              </div>
+
+              {/* Шаг 1 — Подключение */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center flex-shrink-0 text-xs font-bold text-primary-foreground">1</div>
+                  <div className="text-base font-bold text-foreground">Подключите мессенджер</div>
+                </div>
+                <div className="ml-10 space-y-3">
+                  <p className="text-sm text-muted-foreground">Перейдите в раздел <button onClick={() => setTab("connect")} className="text-primary hover:underline font-medium">Подключение</button> и выберите нужную платформу:</p>
+
+                  {[
+                    { icon: "MessageCircle", name: "WhatsApp", color: "text-primary", steps: [
+                      "Нажмите «Получить QR-код для входа»",
+                      "Откройте WhatsApp на телефоне",
+                      "Перейдите: Настройки → Связанные устройства → Привязать устройство",
+                      "Отсканируйте QR-код камерой телефона",
+                      "Дождитесь статуса «WhatsApp успешно подключён»",
+                    ]},
+                    { icon: "Zap", name: "MAX", color: "text-amber-400", steps: [
+                      "Выберите вкладку MAX вверху раздела Подключение",
+                      "Нажмите «Получить QR-код для входа»",
+                      "Откройте приложение MAX на телефоне",
+                      "Найдите раздел Связанные устройства и отсканируйте QR",
+                      "Дождитесь статуса «MAX успешно подключён»",
+                    ]},
+                    { icon: "Send", name: "Telegram", color: "text-blue-400", steps: [
+                      "Выберите вкладку Telegram вверху раздела Подключение",
+                      "Нажмите «Проверить подключение бота»",
+                      "Если бот не подключён — обратитесь к администратору для назначения токена",
+                      "После подключения бот автоматически найдёт группы, в которых состоит",
+                    ]},
+                  ].map((p) => (
+                    <div key={p.name} className="rounded-xl border border-border bg-card p-5">
+                      <div className={`flex items-center gap-2 text-sm font-semibold mb-3 ${p.color}`}>
+                        <Icon name={p.icon} size={16} />
+                        {p.name}
+                      </div>
+                      <ol className="space-y-2">
+                        {p.steps.map((s, i) => (
+                          <li key={i} className="flex items-start gap-3 text-sm text-muted-foreground">
+                            <span className="w-5 h-5 rounded-full bg-secondary flex items-center justify-center flex-shrink-0 text-xs font-semibold text-foreground mt-0.5">{i + 1}</span>
+                            {s}
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Шаг 2 — Группы */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center flex-shrink-0 text-xs font-bold text-primary-foreground">2</div>
+                  <div className="text-base font-bold text-foreground">Добавьте группы для рассылки</div>
+                </div>
+                <div className="ml-10 rounded-xl border border-border bg-card p-5 space-y-3">
+                  <p className="text-sm text-muted-foreground">После подключения мессенджера добавьте группы, которым будете отправлять сообщения:</p>
+                  <div className="space-y-2">
+                    {[
+                      { title: "Импорт из WhatsApp / MAX", desc: "В разделе Подключение → нажмите «Обновить» → отметьте нужные группы галочками → нажмите «Добавить в рассылки»" },
+                      { title: "Импорт из Telegram", desc: "В разделе Подключение → вкладка Telegram → отметьте группы бота → нажмите «Добавить в рассылки»" },
+                      { title: "Добавить вручную", desc: "В разделе Группы → нажмите «Добавить группу» → введите название и выберите тег" },
+                    ].map((item) => (
+                      <div key={item.title} className="flex items-start gap-3 p-3 rounded-lg bg-secondary/40">
+                        <Icon name="CheckCircle" size={16} className="text-primary mt-0.5 flex-shrink-0" />
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">{item.title}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{item.desc}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Шаг 3 — Рассылка */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center flex-shrink-0 text-xs font-bold text-primary-foreground">3</div>
+                  <div className="text-base font-bold text-foreground">Отправьте рассылку</div>
+                </div>
+                <div className="ml-10 rounded-xl border border-border bg-card p-5 space-y-3">
+                  <p className="text-sm text-muted-foreground">Перейдите в раздел <button onClick={() => setTab("broadcast")} className="text-primary hover:underline font-medium">Рассылка</button> и выполните следующие шаги:</p>
+                  <ol className="space-y-3">
+                    {[
+                      { n: 1, text: "Выберите платформу — WhatsApp, MAX или Telegram (вкладки вверху)" },
+                      { n: 2, text: "Введите текст сообщения в поле «Текст сообщения»" },
+                      { n: 3, text: "Отметьте группы-получателей галочками в списке ниже" },
+                      { n: 4, text: "Нажмите кнопку «Отправить» — прогресс-бар покажет ход отправки" },
+                      { n: 5, text: "По завершении появится результат: сколько групп получили сообщение" },
+                    ].map((item) => (
+                      <li key={item.n} className="flex items-start gap-3 text-sm text-muted-foreground">
+                        <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 text-xs font-bold text-primary mt-0.5">{item.n}</span>
+                        {item.text}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+
+              {/* Советы */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full bg-amber-500/80 flex items-center justify-center flex-shrink-0">
+                    <Icon name="Lightbulb" size={14} className="text-white" />
+                  </div>
+                  <div className="text-base font-bold text-foreground">Полезные советы</div>
+                </div>
+                <div className="ml-10 space-y-2">
+                  {[
+                    "Телефон с WhatsApp / MAX должен быть включён и иметь интернет во время рассылки",
+                    "Не отправляйте слишком часто — мессенджеры могут заблокировать аккаунт за спам",
+                    "Используйте теги групп (VIP, Клиенты, Партнёры) для удобной сортировки",
+                    "Telegram-бот должен быть администратором группы, чтобы отправлять сообщения",
+                    "При отправке большого числа групп используйте краткий и информативный текст",
+                  ].map((tip, i) => (
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-lg border border-amber-500/20 bg-amber-500/5">
+                      <Icon name="Info" size={14} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                      <span className="text-sm text-muted-foreground">{tip}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Быстрые действия */}
+              <div className="rounded-xl border border-border bg-card p-6">
+                <div className="text-sm font-bold text-foreground mb-4">Быстрый старт</div>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { icon: "Smartphone", label: "Подключить", tab: "connect" as Tab },
+                    { icon: "Users", label: "Группы", tab: "groups" as Tab },
+                    { icon: "Send", label: "Рассылка", tab: "broadcast" as Tab },
+                  ].map((item) => (
+                    <button key={item.tab} onClick={() => setTab(item.tab)}
+                      className="flex flex-col items-center gap-2 p-4 rounded-xl bg-secondary/60 hover:bg-primary/10 hover:border-primary/30 border border-transparent transition-all text-muted-foreground hover:text-primary">
+                      <Icon name={item.icon} size={22} />
+                      <span className="text-xs font-medium">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          )}
 
         </div>
       </main>
