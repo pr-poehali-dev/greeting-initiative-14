@@ -663,10 +663,10 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
             {/* Скрытая кнопка администратора */}
             <button
               onClick={() => isAdmin ? setTab("users") : setShowAdminPrompt(true)}
-              className={`p-1 rounded transition-colors ${isAdmin ? "text-amber-400 hover:text-amber-300" : "text-muted-foreground/20 hover:text-muted-foreground/60"}`}
+              className={`p-1 rounded transition-colors ${isAdmin ? "text-amber-400 hover:text-amber-300" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
               title="Управление пользователями"
             >
-              <Icon name="Shield" size={13} />
+              <Icon name="Shield" size={14} />
             </button>
           </div>
           <button
