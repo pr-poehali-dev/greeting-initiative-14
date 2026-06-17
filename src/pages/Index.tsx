@@ -10,7 +10,7 @@ const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338
 const SEND_URL = "https://functions.poehali.dev/3c368aad-a7c2-4a91-9095-ac1a47fe77c9";
 const TELEGRAM_URL = "https://functions.poehali.dev/97d4798c-1a93-44d3-9fdc-40acf141a66b";
 
-type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect" | "help";
+type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect" | "help" | "users";
 type WaStatus = "disconnected" | "loading" | "qr" | "connected";
 type Platform = "whatsapp" | "max" | "telegram";
 
@@ -87,6 +87,22 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [selectedWaGroups, setSelectedWaGroups] = useState<string[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Admin state
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminPrompt, setShowAdminPrompt] = useState(false);
+  const [adminSecretInput, setAdminSecretInput] = useState("");
+  const [adminSecretError, setAdminSecretError] = useState("");
+  const [adminUsers, setAdminUsers] = useState<{id: number; email: string}[]>([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [adminSecret, setAdminSecret] = useState("");
+  const [resetUserId, setResetUserId] = useState<number | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [adminActionLoading, setAdminActionLoading] = useState(false);
+  const [adminMsg, setAdminMsg] = useState<{text: string; ok: boolean} | null>(null);
 
   // Multi-account state
   const [waAccounts, setWaAccounts] = useState<WaAccount[]>([]);
@@ -486,6 +502,117 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setGroups((prev) => prev.filter((g) => g.id !== id));
   }
 
+  async function verifyAdminSecret() {
+    setAdminActionLoading(true);
+    setAdminSecretError("");
+    try {
+      const res = await fetch(`${AUTH_URL}?action=list_users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: adminSecretInput }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setAdminSecretError("Неверный пароль");
+      } else {
+        setAdminSecret(adminSecretInput);
+        setIsAdmin(true);
+        setShowAdminPrompt(false);
+        setAdminSecretInput("");
+        setAdminUsers(data.users || []);
+        setTab("users");
+      }
+    } catch {
+      setAdminSecretError("Ошибка соединения");
+    }
+    setAdminActionLoading(false);
+  }
+
+  async function fetchAdminUsers() {
+    setAdminLoading(true);
+    try {
+      const res = await fetch(`${AUTH_URL}?action=list_users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: adminSecret }),
+      });
+      const data = await res.json();
+      setAdminUsers(data.users || []);
+    } catch { /* ignore */ }
+    setAdminLoading(false);
+  }
+
+  async function createUser() {
+    if (!newUserEmail.trim() || !newUserPassword.trim()) return;
+    setAdminActionLoading(true);
+    setAdminMsg(null);
+    try {
+      const res = await fetch(`${AUTH_URL}?action=create_user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: adminSecret, email: newUserEmail.trim(), password: newUserPassword }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setAdminMsg({ text: `Пользователь ${newUserEmail} создан`, ok: true });
+        setNewUserEmail(""); setNewUserPassword("");
+        setShowCreateUser(false);
+        fetchAdminUsers();
+      } else {
+        setAdminMsg({ text: data.error || "Ошибка", ok: false });
+      }
+    } catch {
+      setAdminMsg({ text: "Ошибка соединения", ok: false });
+    }
+    setAdminActionLoading(false);
+  }
+
+  async function doResetPassword() {
+    if (!resetUserId || !resetPassword.trim()) return;
+    setAdminActionLoading(true);
+    setAdminMsg(null);
+    try {
+      const res = await fetch(`${AUTH_URL}?action=reset_password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: adminSecret, user_id: resetUserId, new_password: resetPassword }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setAdminMsg({ text: "Пароль успешно изменён", ok: true });
+        setResetUserId(null); setResetPassword("");
+      } else {
+        setAdminMsg({ text: data.error || "Ошибка", ok: false });
+      }
+    } catch {
+      setAdminMsg({ text: "Ошибка соединения", ok: false });
+    }
+    setAdminActionLoading(false);
+  }
+
+  async function deleteUser(userId: number, email: string) {
+    if (!confirm(`Удалить пользователя ${email}?`)) return;
+    setAdminActionLoading(true);
+    setAdminMsg(null);
+    try {
+      const res = await fetch(`${AUTH_URL}?action=delete_user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: adminSecret, user_id: userId }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setAdminMsg({ text: `Пользователь удалён`, ok: true });
+        fetchAdminUsers();
+      } else {
+        setAdminMsg({ text: data.error || "Ошибка", ok: false });
+      }
+    } catch {
+      setAdminMsg({ text: "Ошибка соединения", ok: false });
+    }
+    setAdminActionLoading(false);
+  }
+
   return (
     <div className="min-h-screen bg-background flex" style={{ fontFamily: "'Golos Text', sans-serif" }}>
       {/* Sidebar */}
@@ -533,6 +660,14 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
               <Icon name="User" size={12} className="text-primary" />
             </div>
             <div className="text-xs text-muted-foreground truncate flex-1">{userEmail}</div>
+            {/* Скрытая кнопка администратора */}
+            <button
+              onClick={() => isAdmin ? setTab("users") : setShowAdminPrompt(true)}
+              className={`p-1 rounded transition-colors ${isAdmin ? "text-amber-400 hover:text-amber-300" : "text-muted-foreground/20 hover:text-muted-foreground/60"}`}
+              title="Управление пользователями"
+            >
+              <Icon name="Shield" size={13} />
+            </button>
           </div>
           <button
             onClick={onLogout}
@@ -542,6 +677,44 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
             Выйти
           </button>
         </div>
+
+        {/* Модалка ввода Admin Secret */}
+        {showAdminPrompt && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => { setShowAdminPrompt(false); setAdminSecretInput(""); setAdminSecretError(""); }}>
+            <div className="bg-card border border-border rounded-2xl p-6 w-80 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 flex items-center justify-center">
+                  <Icon name="Shield" size={18} className="text-amber-400" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-foreground">Администратор</div>
+                  <div className="text-xs text-muted-foreground">Введите секретный пароль</div>
+                </div>
+              </div>
+              <Input
+                type="password"
+                placeholder="Секретный пароль"
+                value={adminSecretInput}
+                onChange={(e) => { setAdminSecretInput(e.target.value); setAdminSecretError(""); }}
+                onKeyDown={(e) => e.key === "Enter" && verifyAdminSecret()}
+                className="h-10"
+                autoFocus
+              />
+              {adminSecretError && (
+                <div className="text-xs text-destructive">{adminSecretError}</div>
+              )}
+              <div className="flex gap-2">
+                <Button onClick={verifyAdminSecret} disabled={adminActionLoading || !adminSecretInput.trim()} className="flex-1 bg-amber-500 hover:bg-amber-500/90 text-white h-9 text-sm">
+                  {adminActionLoading ? <Icon name="Loader" size={14} className="animate-spin" /> : "Войти"}
+                </Button>
+                <Button variant="ghost" onClick={() => { setShowAdminPrompt(false); setAdminSecretInput(""); setAdminSecretError(""); }} className="h-9 text-sm">
+                  Отмена
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </aside>
 
       {/* Main */}
@@ -1341,6 +1514,117 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                       Выбрано групп: <span className="text-foreground font-semibold">{selectedGroups.length}</span> · Получателей:{" "}
                       <span className="text-foreground font-semibold">{groups.filter((g) => selectedGroups.includes(g.id)).reduce((s, g) => s + g.members, 0)}</span>
                     </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── USERS (Admin) ── */}
+          {tab === "users" && isAdmin && (
+            <div className="max-w-2xl space-y-6">
+
+              {/* Заголовок */}
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-6 py-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                    <Icon name="Shield" size={20} className="text-amber-400" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-foreground">Управление пользователями</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">Только для администратора</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="ghost" onClick={fetchAdminUsers} className="h-8 text-xs text-muted-foreground gap-1.5">
+                    <Icon name="RefreshCw" size={13} />Обновить
+                  </Button>
+                  <Button size="sm" onClick={() => { setShowCreateUser(true); setAdminMsg(null); }} className="h-8 text-xs bg-primary text-primary-foreground gap-1.5">
+                    <Icon name="UserPlus" size={13} />Новый пользователь
+                  </Button>
+                </div>
+              </div>
+
+              {/* Сообщение об успехе/ошибке */}
+              {adminMsg && (
+                <div className={`rounded-lg px-4 py-3 text-sm border animate-fade-in ${adminMsg.ok ? "bg-primary/10 border-primary/30 text-primary" : "bg-destructive/10 border-destructive/30 text-destructive"}`}>
+                  {adminMsg.text}
+                </div>
+              )}
+
+              {/* Форма создания пользователя */}
+              {showCreateUser && (
+                <div className="rounded-xl border border-border bg-card p-5 space-y-3 animate-fade-in">
+                  <div className="text-sm font-semibold text-foreground">Новый пользователь</div>
+                  <Input placeholder="Email / логин" value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} className="h-9 text-sm" />
+                  <Input placeholder="Пароль" type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} className="h-9 text-sm" />
+                  <div className="flex gap-2">
+                    <Button onClick={createUser} disabled={adminActionLoading || !newUserEmail.trim() || !newUserPassword.trim()} className="flex-1 h-9 text-sm bg-primary text-primary-foreground">
+                      {adminActionLoading ? <><Icon name="Loader" size={14} className="animate-spin mr-1.5" />Создаём...</> : "Создать"}
+                    </Button>
+                    <Button variant="ghost" onClick={() => { setShowCreateUser(false); setNewUserEmail(""); setNewUserPassword(""); }} className="h-9 text-sm">Отмена</Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Список пользователей */}
+              {adminLoading ? (
+                <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground text-sm">
+                  <Icon name="Loader" size={16} className="animate-spin" />Загрузка...
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border bg-card overflow-hidden">
+                  {adminUsers.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
+                      <Icon name="Users" size={32} className="opacity-20" />
+                      <span className="text-sm">Нет пользователей</span>
+                    </div>
+                  ) : (
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border">
+                          {["ID", "Логин", ""].map((h) => (
+                            <th key={h} className="text-left text-xs text-muted-foreground font-medium px-5 py-3">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminUsers.map((u, i) => (
+                          <tr key={u.id} className={`hover:bg-secondary/40 transition-colors ${i < adminUsers.length - 1 ? "border-b border-border/50" : ""}`}>
+                            <td className="px-5 py-3.5 text-xs text-muted-foreground w-12">#{u.id}</td>
+                            <td className="px-5 py-3.5 text-sm text-foreground font-medium">{u.email}</td>
+                            <td className="px-5 py-3.5 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                {resetUserId === u.id ? (
+                                  <div className="flex items-center gap-2">
+                                    <Input
+                                      placeholder="Новый пароль"
+                                      type="password"
+                                      value={resetPassword}
+                                      onChange={(e) => setResetPassword(e.target.value)}
+                                      className="h-7 text-xs w-36"
+                                    />
+                                    <button onClick={doResetPassword} disabled={adminActionLoading || !resetPassword.trim()} className="text-xs text-primary hover:underline font-medium disabled:opacity-40">
+                                      {adminActionLoading ? "..." : "Сохранить"}
+                                    </button>
+                                    <button onClick={() => { setResetUserId(null); setResetPassword(""); }} className="text-xs text-muted-foreground hover:text-foreground">
+                                      Отмена
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button onClick={() => { setResetUserId(u.id); setResetPassword(""); setAdminMsg(null); }} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-secondary transition-colors">
+                                    <Icon name="KeyRound" size={13} />
+                                  </button>
+                                )}
+                                <button onClick={() => deleteUser(u.id, u.email)} disabled={adminActionLoading} className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10">
+                                  <Icon name="Trash2" size={13} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </div>
               )}
