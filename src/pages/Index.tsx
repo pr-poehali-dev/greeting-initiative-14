@@ -1410,6 +1410,38 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 </div>
               </div>
 
+              {/* Несколько аккаунтов */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full bg-blue-500/80 flex items-center justify-center flex-shrink-0">
+                    <Icon name="Layers" size={14} className="text-white" />
+                  </div>
+                  <div className="text-base font-bold text-foreground">Несколько аккаунтов WhatsApp / MAX</div>
+                </div>
+                <div className="ml-10 rounded-xl border border-blue-500/20 bg-blue-500/5 p-5 space-y-4">
+                  <p className="text-sm text-muted-foreground">Можно подключить неограниченное количество аккаунтов WhatsApp или MAX. При рассылке группы автоматически распределятся между всеми аккаунтами — нагрузка делится поровну, скорость рассылки растёт.</p>
+                  <div className="space-y-2">
+                    {[
+                      { n: 1, text: "Перейдите в раздел Подключение → выберите вкладку WhatsApp или MAX" },
+                      { n: 2, text: "В блоке «Аккаунты» нажмите «+ Добавить»" },
+                      { n: 3, text: "Введите название аккаунта (например: «Основной» или «Запасной»)" },
+                      { n: 4, text: "Введите Instance ID и Token из вашего личного кабинета Green API (green-api.com)" },
+                      { n: 5, text: "Нажмите «Добавить», затем «Подключить» — отсканируйте QR на телефоне" },
+                      { n: 6, text: "Повторите для каждого дополнительного аккаунта" },
+                    ].map((item) => (
+                      <div key={item.n} className="flex items-start gap-3 text-sm text-muted-foreground">
+                        <span className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center flex-shrink-0 text-xs font-bold text-blue-400 mt-0.5">{item.n}</span>
+                        {item.text}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                    <Icon name="Zap" size={14} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                    <span className="text-xs text-muted-foreground">При рассылке в разделе <button onClick={() => setTab("broadcast")} className="text-primary hover:underline font-medium">Рассылка</button> появится зелёный баннер — он покажет, что сообщения пойдут через все аккаунты сразу.</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Шаг 2 — Группы */}
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
