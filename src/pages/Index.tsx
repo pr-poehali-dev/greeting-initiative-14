@@ -26,6 +26,14 @@ interface WaGroup {
   members: number;
 }
 
+interface WaAccount {
+  id: number;
+  name: string;
+  instance_id: string;
+  token: string;
+  status: string;
+}
+
 interface Group {
   id: number;
   name: string;
@@ -80,6 +88,21 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [selectedWaGroups, setSelectedWaGroups] = useState<string[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Multi-account state
+  const [waAccounts, setWaAccounts] = useState<WaAccount[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [newAccName, setNewAccName] = useState("");
+  const [newAccInstance, setNewAccInstance] = useState("");
+  const [newAccToken, setNewAccToken] = useState("");
+  const [addingAccount, setAddingAccount] = useState(false);
+  const [activeAccountId, setActiveAccountId] = useState<number | null>(null);
+  const [accountQrImage, setAccountQrImage] = useState<string | null>(null);
+  const [accountQrError, setAccountQrError] = useState<string | null>(null);
+  const [accountQrStatus, setAccountQrStatus] = useState<WaStatus>("disconnected");
+  const accountPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const accountQrRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Telegram state
   const [tgStatus, setTgStatus] = useState<"disconnected" | "connected" | "loading">("disconnected");
   const [tgBotName, setTgBotName] = useState<string>("");
@@ -101,6 +124,12 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const apiHeaders = { "X-Session-Id": sessionId };
 
   const qrRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (tab === "connect" && (platform === "whatsapp" || platform === "max")) {
+      fetchAccounts(platform);
+    }
+  }, [tab, platform]);
 
   // Polling для WA/MAX QR
   useEffect(() => {
@@ -185,6 +214,107 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setBotActive(false);
     setQrImage(null);
     setImportedGroups([]);
+  }
+
+  async function fetchAccounts(plat: Platform = "whatsapp") {
+    setLoadingAccounts(true);
+    try {
+      const res = await fetch(`${GREENAPI_URL}?action=list_accounts&platform=${plat}`, { headers: apiHeaders });
+      const data = await res.json();
+      setWaAccounts(data.accounts || []);
+    } catch {
+      setWaAccounts([]);
+    } finally {
+      setLoadingAccounts(false);
+    }
+  }
+
+  async function addAccount() {
+    if (!newAccInstance.trim() || !newAccToken.trim()) return;
+    setAddingAccount(true);
+    try {
+      const res = await fetch(`${GREENAPI_URL}?action=add_account&platform=${platform}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+        body: JSON.stringify({ name: newAccName, instance_id: newAccInstance.trim(), token: newAccToken.trim() }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setNewAccName(""); setNewAccInstance(""); setNewAccToken("");
+        setShowAddAccount(false);
+        fetchAccounts(platform);
+      }
+    } catch { /* ignore */ }
+    setAddingAccount(false);
+  }
+
+  async function removeAccount(accountId: number) {
+    try {
+      await fetch(`${GREENAPI_URL}?action=remove_account&platform=${platform}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+        body: JSON.stringify({ account_id: accountId }),
+      });
+      if (activeAccountId === accountId) {
+        setActiveAccountId(null);
+        setAccountQrImage(null);
+        setAccountQrStatus("disconnected");
+      }
+      fetchAccounts(platform);
+    } catch { /* ignore */ }
+  }
+
+  async function requestAccountQr(accountId: number) {
+    setActiveAccountId(accountId);
+    setAccountQrStatus("loading");
+    setAccountQrError(null);
+    setAccountQrImage(null);
+    try {
+      const res = await fetch(`${GREENAPI_URL}?action=qr_account&platform=${platform}&account_id=${accountId}`, { headers: apiHeaders });
+      const data = await res.json();
+      if (data.already_connected) {
+        setAccountQrStatus("connected");
+        fetchAccounts(platform);
+        return;
+      }
+      if (data.qr_code) {
+        setAccountQrImage(data.qr_code);
+        setAccountQrStatus("qr");
+        if (accountPollRef.current) clearInterval(accountPollRef.current);
+        if (accountQrRefreshRef.current) clearInterval(accountQrRefreshRef.current);
+        accountPollRef.current = setInterval(async () => {
+          try {
+            const r = await fetch(`${GREENAPI_URL}?action=status_account&platform=${platform}&account_id=${accountId}`, { headers: apiHeaders });
+            const d = await r.json();
+            if (d.connected) {
+              clearInterval(accountPollRef.current!);
+              clearInterval(accountQrRefreshRef.current!);
+              setAccountQrStatus("connected");
+              setAccountQrImage(null);
+              fetchAccounts(platform);
+            }
+          } catch { /* ignore */ }
+        }, 4000);
+        accountQrRefreshRef.current = setInterval(async () => {
+          try {
+            const r = await fetch(`${GREENAPI_URL}?action=qr_account&platform=${platform}&account_id=${accountId}`, { headers: apiHeaders });
+            const d = await r.json();
+            if (d.already_connected) {
+              clearInterval(accountPollRef.current!);
+              clearInterval(accountQrRefreshRef.current!);
+              setAccountQrStatus("connected");
+              fetchAccounts(platform);
+            } else if (d.qr_code) setAccountQrImage(d.qr_code);
+          } catch { /* ignore */ }
+        }, 15000);
+      } else {
+        setAccountQrError(data.error || "Не удалось получить QR-код");
+        setAccountQrStatus("disconnected");
+      }
+    } catch {
+      setAccountQrError("Ошибка соединения");
+      setAccountQrStatus("disconnected");
+    }
   }
 
   async function fetchWaGroups(plat: Platform = "whatsapp") {
@@ -278,7 +408,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
         const res = await fetch(`${SEND_URL}?platform=${platform}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
-          body: JSON.stringify({ text: broadcastText, group_ids: batch }),
+          body: JSON.stringify({ text: broadcastText, group_ids: batch, multi_account: waAccounts.length > 0 }),
           signal: controller.signal,
         });
         clearTimeout(timeout);
@@ -450,7 +580,140 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 ))}
               </div>
 
-              {/* WhatsApp / MAX — QR подключение */}
+              {/* ── Несколько аккаунтов WhatsApp / MAX ── */}
+              {(platform === "whatsapp" || platform === "max") && (
+                <div className="rounded-xl border border-border bg-card overflow-hidden">
+                  <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Icon name="Smartphone" size={16} className="text-primary" />
+                      <span className="text-sm font-semibold text-foreground">Аккаунты {platform === "max" ? "MAX" : "WhatsApp"}</span>
+                      {waAccounts.length > 0 && (
+                        <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full font-medium">{waAccounts.length}</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setShowAddAccount(true)}
+                      className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-medium transition-colors"
+                    >
+                      <Icon name="Plus" size={14} />Добавить
+                    </button>
+                  </div>
+
+                  {loadingAccounts ? (
+                    <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground text-sm">
+                      <Icon name="Loader" size={16} className="animate-spin" />Загрузка...
+                    </div>
+                  ) : waAccounts.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
+                      <Icon name="Smartphone" size={32} className="opacity-20" />
+                      <span className="text-sm">Нет добавленных аккаунтов</span>
+                      <button onClick={() => setShowAddAccount(true)} className="text-xs text-primary hover:underline mt-1">
+                        + Добавить первый аккаунт
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-border/50">
+                      {waAccounts.map((acc) => (
+                        <div key={acc.id} className="px-5 py-3 flex items-center gap-3">
+                          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${acc.status === "connected" ? "bg-primary" : "bg-muted-foreground/40"}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-foreground truncate">{acc.name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {acc.status === "connected" ? "Подключён" : "Отключён"} · ID: {acc.instance_id.slice(0, 12)}...
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {acc.status !== "connected" && (
+                              <button
+                                onClick={() => requestAccountQr(acc.id)}
+                                className="text-xs text-primary hover:text-primary/80 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 transition-colors font-medium"
+                              >
+                                Подключить
+                              </button>
+                            )}
+                            <button
+                              onClick={() => removeAccount(acc.id)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            >
+                              <Icon name="Trash2" size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Форма добавления аккаунта */}
+                  {showAddAccount && (
+                    <div className="border-t border-border px-5 py-4 bg-secondary/30 space-y-3 animate-fade-in">
+                      <div className="text-sm font-semibold text-foreground">Новый аккаунт</div>
+                      <Input
+                        placeholder="Название (например: Основной)"
+                        value={newAccName}
+                        onChange={(e) => setNewAccName(e.target.value)}
+                        className="h-9 text-sm"
+                      />
+                      <Input
+                        placeholder="Instance ID (из Green API)"
+                        value={newAccInstance}
+                        onChange={(e) => setNewAccInstance(e.target.value)}
+                        className="h-9 text-sm font-mono"
+                      />
+                      <Input
+                        placeholder="Token (из Green API)"
+                        value={newAccToken}
+                        onChange={(e) => setNewAccToken(e.target.value)}
+                        className="h-9 text-sm font-mono"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={addAccount}
+                          disabled={addingAccount || !newAccInstance.trim() || !newAccToken.trim()}
+                          className="flex-1 h-9 text-sm bg-primary text-primary-foreground"
+                        >
+                          {addingAccount ? <><Icon name="Loader" size={14} className="animate-spin mr-1" />Добавляем...</> : "Добавить"}
+                        </Button>
+                        <Button variant="ghost" onClick={() => { setShowAddAccount(false); setNewAccName(""); setNewAccInstance(""); setNewAccToken(""); }} className="h-9 text-sm">
+                          Отмена
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* QR для конкретного аккаунта */}
+                  {activeAccountId !== null && accountQrStatus !== "disconnected" && (
+                    <div className="border-t border-border px-5 py-4 space-y-3 animate-fade-in">
+                      {accountQrStatus === "loading" && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Icon name="Loader" size={14} className="animate-spin" />Загружаем QR-код...
+                        </div>
+                      )}
+                      {accountQrStatus === "qr" && accountQrImage && (
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="text-xs text-muted-foreground font-medium">Отсканируйте QR-код</div>
+                          <div className="rounded-xl overflow-hidden border-4 border-white shadow-lg">
+                            <img src={accountQrImage} alt="QR" className="w-44 h-44 object-contain" />
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                            Ожидаем сканирования...
+                          </div>
+                        </div>
+                      )}
+                      {accountQrStatus === "connected" && (
+                        <div className="flex items-center gap-2 text-sm text-primary font-medium">
+                          <Icon name="CheckCircle" size={16} />Аккаунт успешно подключён!
+                        </div>
+                      )}
+                      {accountQrError && (
+                        <div className="text-sm text-destructive">{accountQrError}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* WhatsApp / MAX — QR подключение (legacy основной аккаунт) */}
               {(platform === "whatsapp" || platform === "max") && (() => {
                 const st = platform === "max" ? maxStatus : waStatus;
                 const platformLabel = platform === "max" ? "MAX" : "WhatsApp";
@@ -899,8 +1162,21 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 ))}
               </div>
 
+              {/* Баннер: рассылка со всех аккаунтов */}
+              {(platform === "whatsapp" || platform === "max") && waAccounts.length > 0 && (
+                <div className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-3 flex items-center gap-3">
+                  <Icon name="Layers" size={16} className="text-primary flex-shrink-0" />
+                  <span className="text-sm text-foreground">
+                    Рассылка пойдёт через все <span className="text-primary font-semibold">{waAccounts.length} аккаунта</span> одновременно — группы распределятся между ними автоматически
+                  </span>
+                  <button onClick={() => { setTab("connect"); }} className="ml-auto text-xs text-primary hover:underline flex-shrink-0">
+                    Управлять
+                  </button>
+                </div>
+              )}
+
               {/* Предупреждение если не подключено */}
-              {platform === "whatsapp" && waStatus !== "connected" && (
+              {platform === "whatsapp" && waStatus !== "connected" && waAccounts.length === 0 && (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <Icon name="AlertTriangle" size={16} className="text-amber-400 shrink-0" />
@@ -911,7 +1187,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                   </Button>
                 </div>
               )}
-              {platform === "max" && maxStatus !== "connected" && (
+              {platform === "max" && maxStatus !== "connected" && waAccounts.length === 0 && (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <Icon name="AlertTriangle" size={16} className="text-amber-400 shrink-0" />
@@ -951,8 +1227,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                     disabled={
                       !broadcastText.trim() || sending ||
                       (platform === "telegram" ? tgStatus !== "connected" || tgSelectedGroups.length === 0 :
-                       platform === "max" ? maxStatus !== "connected" || selectedGroups.length === 0 :
-                       waStatus !== "connected" || selectedGroups.length === 0)
+                       platform === "max" ? (maxStatus !== "connected" && waAccounts.length === 0) || selectedGroups.length === 0 :
+                       (waStatus !== "connected" && waAccounts.length === 0) || selectedGroups.length === 0)
                     }
                     className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11 text-sm font-semibold disabled:opacity-40 whitespace-nowrap"
                   >

@@ -5,7 +5,7 @@
       "method": "POST",
       "path": "/",
       "body": {"group_ids": ["123@g.us"]},
-      "expectedStatus": 200,
+      "expectedStatus": 400,
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
     }

@@ -16,7 +16,7 @@ cors = {
 
 
 def get_user_instance(session_id: str, platform: str = "whatsapp") -> tuple:
-    """Получает instance_id и token пользователя по session_id и платформе."""
+    """Получает instance_id и token пользователя по session_id (legacy)."""
     if not session_id:
         return "", ""
     try:
@@ -40,6 +40,27 @@ def get_user_instance(session_id: str, platform: str = "whatsapp") -> tuple:
     return "", ""
 
 
+def get_all_accounts(session_id: str, platform: str) -> list:
+    """Возвращает все аккаунты пользователя из wa_accounts."""
+    if not session_id:
+        return []
+    try:
+        db = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = db.cursor()
+        cur.execute(f"""
+            SELECT a.instance_id, a.token
+            FROM {SCHEMA}.wa_accounts a
+            JOIN {SCHEMA}.sessions s ON s.user_id = a.user_id
+            WHERE s.id=%s AND s.expires_at > NOW() AND a.platform=%s
+        """, (session_id, platform))
+        rows = cur.fetchall()
+        db.close()
+        return [(r[0], r[1]) for r in rows if r[0] and r[1]]
+    except Exception as e:
+        print(f"[send] DB error get_all_accounts: {e}")
+        return []
+
+
 def send_message(instance_id: str, token: str, group_id: str, text: str) -> dict:
     """Отправляет сообщение в группу через Green API."""
     url = f"{BASE_URL}/waInstance{instance_id}/sendMessage/{token}"
@@ -60,21 +81,13 @@ def send_message(instance_id: str, token: str, group_id: str, text: str) -> dict
 
 
 def handler(event: dict, context) -> dict:
-    """Отправка сообщения в группы WhatsApp через Green API."""
+    """Отправка сообщения в группы WhatsApp через все аккаунты или через один (legacy)."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors, "body": ""}
 
     session_id = (event.get("headers") or {}).get("X-Session-Id", "")
     params = event.get("queryStringParameters") or {}
     platform = params.get("platform", "whatsapp")
-    instance_id, token = get_user_instance(session_id, platform)
-
-    if not instance_id or not token:
-        return {
-            "statusCode": 200,
-            "headers": {**cors, "Content-Type": "application/json"},
-            "body": json.dumps({"error": "Инстанс не назначен. Обратитесь к администратору."}),
-        }
 
     body = {}
     if event.get("body"):
@@ -85,11 +98,55 @@ def handler(event: dict, context) -> dict:
 
     text = (body.get("text") or "").strip()
     group_ids = body.get("group_ids", [])
+    # multi_account=true — отправить со всех аккаунтов
+    multi = body.get("multi_account", False)
 
     if not text:
-        return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"}, "body": json.dumps({"error": "Текст сообщения обязателен"})}
+        return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"},
+                "body": json.dumps({"error": "Текст сообщения обязателен"})}
     if not group_ids:
-        return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"}, "body": json.dumps({"error": "Выберите хотя бы одну группу"})}
+        return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"},
+                "body": json.dumps({"error": "Выберите хотя бы одну группу"})}
+
+    if multi:
+        # Собираем все аккаунты из wa_accounts
+        accounts = get_all_accounts(session_id, platform)
+        if not accounts:
+            # Фолбэк на legacy аккаунт из users
+            instance_id, token = get_user_instance(session_id, platform)
+            if instance_id and token:
+                accounts = [(instance_id, token)]
+        if not accounts:
+            return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"error": "Нет подключённых аккаунтов"})}
+
+        # Распределяем группы по аккаунтам поровну
+        total_sent = 0
+        total_failed = 0
+        all_results = []
+        n = len(accounts)
+        for acc_idx, (instance_id, token) in enumerate(accounts):
+            # каждый аккаунт получает свою долю групп
+            acc_groups = [g for i, g in enumerate(group_ids) if i % n == acc_idx]
+            for i, group_id in enumerate(acc_groups):
+                result = send_message(instance_id, token, group_id, text)
+                result["account_idx"] = acc_idx
+                all_results.append(result)
+                if i < len(acc_groups) - 1:
+                    time.sleep(2.5)
+            if acc_idx < n - 1:
+                time.sleep(1.0)
+        total_sent = sum(1 for r in all_results if r["ok"])
+        total_failed = len(all_results) - total_sent
+        return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
+                "body": json.dumps({"sent": total_sent, "failed": total_failed,
+                                    "total": len(all_results), "accounts_used": len(accounts)})}
+
+    # Legacy: один аккаунт из users
+    instance_id, token = get_user_instance(session_id, platform)
+    if not instance_id or not token:
+        return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
+                "body": json.dumps({"error": "Инстанс не назначен. Обратитесь к администратору."})}
 
     results = []
     for i, group_id in enumerate(group_ids):
@@ -100,9 +157,5 @@ def handler(event: dict, context) -> dict:
 
     sent = sum(1 for r in results if r["ok"])
     failed = len(results) - sent
-
-    return {
-        "statusCode": 200,
-        "headers": {**cors, "Content-Type": "application/json"},
-        "body": json.dumps({"sent": sent, "failed": failed, "total": len(results), "results": results}),
-    }
+    return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
+            "body": json.dumps({"sent": sent, "failed": failed, "total": len(results), "results": results})}
