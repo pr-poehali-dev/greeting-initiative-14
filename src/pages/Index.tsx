@@ -9,10 +9,11 @@ const GREENAPI_URL = "https://functions.poehali.dev/2be7b0f6-d7f9-474a-b21e-d4a7
 const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338b69b";
 const SEND_URL = "https://functions.poehali.dev/3c368aad-a7c2-4a91-9095-ac1a47fe77c9";
 const TELEGRAM_URL = "https://functions.poehali.dev/97d4798c-1a93-44d3-9fdc-40acf141a66b";
+const WHAPI_URL = "https://functions.poehali.dev/f6a3c6b6-03f7-4150-b586-7cf660c83ced";
 
 type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect" | "help" | "users";
 type WaStatus = "disconnected" | "loading" | "qr" | "connected";
-type Platform = "whatsapp" | "max" | "telegram";
+type Platform = "whatsapp" | "max" | "telegram" | "whapi";
 
 interface IndexProps {
   sessionId: string;
@@ -121,6 +122,14 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const accountPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const accountQrRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Whapi state
+  const [whapiStatus, setWhapiStatus] = useState<WaStatus>("disconnected");
+  const [whapiQrImage, setWhapiQrImage] = useState<string | null>(null);
+  const [whapiQrError, setWhapiQrError] = useState<string | null>(null);
+  const [whapiGroups, setWhapiGroups] = useState<WaGroup[]>([]);
+  const [whapiSelectedGroups, setWhapiSelectedGroups] = useState<string[]>([]);
+  const [loadingWhapiGroups, setLoadingWhapiGroups] = useState(false);
+
   // Telegram state
   const [tgStatus, setTgStatus] = useState<"disconnected" | "connected" | "loading">("disconnected");
   const [tgBotName, setTgBotName] = useState<string>("");
@@ -221,6 +230,69 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       setQrError("Ошибка соединения с сервером. Попробуйте ещё раз.");
       (platform === "max" ? setMaxStatus : setWaStatus)("disconnected");
     }
+  }
+
+  async function requestWhapiQr() {
+    setWhapiStatus("loading");
+    setWhapiQrError(null);
+    setWhapiQrImage(null);
+    try {
+      const res = await fetch(`${WHAPI_URL}?action=qr`, { headers: apiHeaders });
+      const data = await res.json();
+      if (data.error) {
+        setWhapiQrError(data.message || data.error);
+        setWhapiStatus("disconnected");
+        return;
+      }
+      if (data.already_connected) {
+        setWhapiStatus("connected");
+        fetchWhapiGroups();
+        return;
+      }
+      if (data.qr_code) {
+        setWhapiQrImage(data.qr_code);
+        setWhapiStatus("qr");
+      } else {
+        setWhapiQrError("Не удалось получить QR-код. Проверьте токен Whapi.");
+        setWhapiStatus("disconnected");
+      }
+    } catch {
+      setWhapiQrError("Ошибка соединения с сервером.");
+      setWhapiStatus("disconnected");
+    }
+  }
+
+  async function fetchWhapiGroups() {
+    setLoadingWhapiGroups(true);
+    try {
+      const res = await fetch(`${WHAPI_URL}?action=groups`, { headers: apiHeaders });
+      const data = await res.json();
+      setWhapiGroups(data.groups || []);
+    } catch {
+      setWhapiGroups([]);
+    } finally {
+      setLoadingWhapiGroups(false);
+    }
+  }
+
+  function importWhapiGroups() {
+    const toAdd = whapiGroups
+      .filter((g) => whapiSelectedGroups.includes(g.id))
+      .map((g) => ({
+        id: Date.now() + Math.random(),
+        name: g.name,
+        members: g.members || 0,
+        active: true,
+        tag: "Whapi",
+        waId: g.id,
+      }));
+    setGroups((prev) => {
+      const existingIds = new Set(prev.map((g) => g.waId).filter(Boolean));
+      const fresh = toAdd.filter((g) => !existingIds.has(g.waId));
+      return [...prev, ...fresh];
+    });
+    setWhapiSelectedGroups([]);
+    setTab("groups");
   }
 
   async function disconnectWa() {
@@ -765,7 +837,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
 
               {/* Переключатель платформ */}
               <div className="flex rounded-xl border border-border bg-card p-1 gap-1">
-                {([["whatsapp", "WhatsApp", "MessageCircle"], ["max", "MAX", "Zap"], ["telegram", "Telegram", "Send"]] as const).map(([id, label, icon]) => (
+                {([["whatsapp", "WhatsApp", "MessageCircle"], ["max", "MAX", "Zap"], ["telegram", "Telegram", "Send"], ["whapi", "Whapi", "Wifi"]] as const).map(([id, label, icon]) => (
                   <button
                     key={id}
                     onClick={() => { setPlatform(id); setQrError(null); setQrImage(null); }}
@@ -1033,6 +1105,110 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                   </>
                 );
               })()}
+
+              {/* Whapi */}
+              {platform === "whapi" && (
+                <>
+                  <div className={`rounded-xl border p-5 flex items-start gap-4 transition-all ${whapiStatus === "connected" ? "border-primary/40 bg-primary/5" : "border-border bg-card"}`}>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${whapiStatus === "connected" ? "bg-primary/20" : "bg-secondary"}`}>
+                      <Icon name={whapiStatus === "connected" ? "CheckCircle" : "Wifi"} size={20} className={whapiStatus === "connected" ? "text-primary" : "text-muted-foreground"} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">
+                        {whapiStatus === "connected" ? "Whapi подключён" : whapiStatus === "loading" ? "Подключаемся..." : "Whapi не подключён"}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {whapiStatus === "connected" ? "Аккаунт активен, можно делать рассылки" : "Отсканируйте QR-код в WhatsApp"}
+                      </div>
+                    </div>
+                    {whapiStatus === "connected" && (
+                      <button onClick={() => { setWhapiStatus("disconnected"); setWhapiQrImage(null); setWhapiGroups([]); }} className="ml-auto text-xs text-muted-foreground hover:text-destructive transition-colors">
+                        Отключить
+                      </button>
+                    )}
+                  </div>
+
+                  {whapiQrError && (
+                    <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{whapiQrError}</div>
+                  )}
+
+                  {whapiStatus === "qr" && whapiQrImage && (
+                    <div className="rounded-xl border border-border bg-card p-6 flex flex-col items-center gap-4 animate-fade-in">
+                      <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">QR-код для входа</div>
+                      <div className="rounded-xl overflow-hidden border-4 border-white shadow-lg">
+                        <img src={whapiQrImage} alt="QR" className="w-52 h-52 object-contain" />
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        Ожидаем сканирования...
+                      </div>
+                      <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={requestWhapiQr}>
+                        <Icon name="RefreshCw" size={12} className="mr-1" />Обновить QR
+                      </Button>
+                    </div>
+                  )}
+
+                  {whapiStatus === "disconnected" && (
+                    <Button onClick={requestWhapiQr} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11">
+                      <Icon name="QrCode" size={16} />Получить QR-код для входа
+                    </Button>
+                  )}
+                  {whapiStatus === "loading" && (
+                    <Button disabled className="w-full h-11 gap-2 opacity-60">
+                      <Icon name="Loader" size={16} className="animate-spin" />Подключаемся...
+                    </Button>
+                  )}
+
+                  {whapiStatus === "connected" && (
+                    <div className="rounded-xl border border-border bg-card overflow-hidden animate-fade-in">
+                      <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                        <span className="text-sm font-semibold text-foreground">Группы Whapi</span>
+                        <div className="flex items-center gap-2">
+                          {whapiGroups.length > 0 && (
+                            <button onClick={() => whapiSelectedGroups.length === whapiGroups.length ? setWhapiSelectedGroups([]) : setWhapiSelectedGroups(whapiGroups.map((g) => g.id))} className="text-xs text-primary hover:underline">
+                              {whapiSelectedGroups.length === whapiGroups.length ? "Снять всё" : "Отметить всё"}
+                            </button>
+                          )}
+                          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 gap-1" onClick={fetchWhapiGroups}>
+                            <Icon name="RefreshCw" size={12} />Обновить
+                          </Button>
+                        </div>
+                      </div>
+                      {loadingWhapiGroups ? (
+                        <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground text-sm">
+                          <Icon name="Loader" size={16} className="animate-spin" />Загружаем группы...
+                        </div>
+                      ) : whapiGroups.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+                          <Icon name="Users" size={32} className="opacity-30" />
+                          <span className="text-sm">Нет доступных групп</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="divide-y divide-border/50 max-h-72 overflow-y-auto">
+                            {whapiGroups.map((g) => (
+                              <label key={g.id} className={`flex items-center gap-3 px-6 py-3.5 cursor-pointer transition-colors ${whapiSelectedGroups.includes(g.id) ? "bg-primary/5" : "hover:bg-secondary/40"}`}>
+                                <input type="checkbox" checked={whapiSelectedGroups.includes(g.id)} onChange={() => setWhapiSelectedGroups((prev) => prev.includes(g.id) ? prev.filter((x) => x !== g.id) : [...prev, g.id])} className="w-4 h-4 accent-blue-500" />
+                                <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
+                                  <Icon name="Wifi" size={13} className="text-muted-foreground" />
+                                </div>
+                                <span className="text-sm text-foreground font-medium flex-1 truncate">{g.name}</span>
+                                {g.members ? <span className="text-xs text-muted-foreground">{g.members}</span> : null}
+                              </label>
+                            ))}
+                          </div>
+                          <div className="px-6 py-4 border-t border-border flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">{whapiSelectedGroups.length > 0 ? `Выбрано: ${whapiSelectedGroups.length}` : "Отметьте группы"}</span>
+                            <Button size="sm" disabled={whapiSelectedGroups.length === 0} onClick={importWhapiGroups} className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 disabled:opacity-40">
+                              <Icon name="Download" size={13} />Добавить в рассылки
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
 
               {/* Telegram */}
               {platform === "telegram" && (
@@ -1352,7 +1528,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
 
               {/* Переключатель платформ */}
               <div className="flex rounded-xl border border-border bg-card p-1 gap-1">
-                {([["whatsapp", "WhatsApp", "MessageCircle"], ["max", "MAX", "Zap"], ["telegram", "Telegram", "Send"]] as const).map(([id, label, icon]) => (
+                {([["whatsapp", "WhatsApp", "MessageCircle"], ["max", "MAX", "Zap"], ["telegram", "Telegram", "Send"], ["whapi", "Whapi", "Wifi"]] as const).map(([id, label, icon]) => (
                   <button key={id} onClick={() => { setPlatform(id); setSendResult(null); }}
                     className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all
                       ${platform === id ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"}`}>

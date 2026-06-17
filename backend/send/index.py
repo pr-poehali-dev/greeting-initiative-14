@@ -6,6 +6,7 @@ import time
 import psycopg2
 
 BASE_URL = "https://api.green-api.com"
+WHAPI_BASE = "https://gate.whapi.cloud"
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p54486869_greeting_initiative_")
 
 cors = {
@@ -61,6 +62,27 @@ def get_all_accounts(session_id: str, platform: str) -> list:
         return []
 
 
+def get_whapi_token(session_id: str) -> str:
+    """Получает whapi_token пользователя по session_id."""
+    if not session_id:
+        return ""
+    try:
+        db = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = db.cursor()
+        cur.execute(f"""
+            SELECT u.whapi_token FROM {SCHEMA}.sessions s
+            JOIN {SCHEMA}.users u ON u.id = s.user_id
+            WHERE s.id=%s AND s.expires_at > NOW()
+        """, (session_id,))
+        row = cur.fetchone()
+        db.close()
+        if row and row[0]:
+            return row[0].strip()
+    except Exception as e:
+        print(f"[send] DB error get_whapi_token: {e}")
+    return ""
+
+
 def send_message(instance_id: str, token: str, group_id: str, text: str) -> dict:
     """Отправляет сообщение в группу через Green API."""
     url = f"{BASE_URL}/waInstance{instance_id}/sendMessage/{token}"
@@ -80,8 +102,33 @@ def send_message(instance_id: str, token: str, group_id: str, text: str) -> dict
         return {"ok": False, "group_id": group_id, "error": str(ex)}
 
 
+def send_message_whapi(token: str, group_id: str, text: str) -> dict:
+    """Отправляет сообщение в группу через Whapi.cloud."""
+    url = f"{WHAPI_BASE}/messages/text"
+    payload = json.dumps({"to": group_id, "body": text}).encode()
+    req = urllib.request.Request(
+        url, data=payload, method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            print(f"[send/whapi] OK group={group_id} id={data.get('id', '?')}")
+            return {"ok": True, "group_id": group_id}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"[send/whapi] HTTP {e.code} group={group_id}: {body[:200]}")
+        return {"ok": False, "group_id": group_id, "error": f"HTTP {e.code}"}
+    except Exception as ex:
+        print(f"[send/whapi] Exception group={group_id}: {ex}")
+        return {"ok": False, "group_id": group_id, "error": str(ex)}
+
+
 def handler(event: dict, context) -> dict:
-    """Отправка сообщения в группы WhatsApp через все аккаунты или через один (legacy)."""
+    """Отправка сообщения в группы WhatsApp через Green API или Whapi.cloud."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors, "body": ""}
 
@@ -108,11 +155,27 @@ def handler(event: dict, context) -> dict:
         return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"},
                 "body": json.dumps({"error": "Выберите хотя бы одну группу"})}
 
+    # ── Whapi.cloud ────────────────────────────────────────────────────────
+    if platform == "whapi":
+        whapi_token = get_whapi_token(session_id)
+        if not whapi_token:
+            return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"error": "Токен Whapi не назначен. Обратитесь к администратору."})}
+        results = []
+        for i, group_id in enumerate(group_ids):
+            result = send_message_whapi(whapi_token, group_id, text)
+            results.append(result)
+            if i < len(group_ids) - 1:
+                time.sleep(2.5)
+        sent = sum(1 for r in results if r["ok"])
+        failed = len(results) - sent
+        return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
+                "body": json.dumps({"sent": sent, "failed": failed, "total": len(results), "results": results})}
+
+    # ── Green API (multi-account) ──────────────────────────────────────────
     if multi:
-        # Собираем все аккаунты из wa_accounts
         accounts = get_all_accounts(session_id, platform)
         if not accounts:
-            # Фолбэк на legacy аккаунт из users
             instance_id, token = get_user_instance(session_id, platform)
             if instance_id and token:
                 accounts = [(instance_id, token)]
@@ -120,13 +183,9 @@ def handler(event: dict, context) -> dict:
             return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                     "body": json.dumps({"error": "Нет подключённых аккаунтов"})}
 
-        # Распределяем группы по аккаунтам поровну
-        total_sent = 0
-        total_failed = 0
         all_results = []
         n = len(accounts)
         for acc_idx, (instance_id, token) in enumerate(accounts):
-            # каждый аккаунт получает свою долю групп
             acc_groups = [g for i, g in enumerate(group_ids) if i % n == acc_idx]
             for i, group_id in enumerate(acc_groups):
                 result = send_message(instance_id, token, group_id, text)
@@ -142,7 +201,7 @@ def handler(event: dict, context) -> dict:
                 "body": json.dumps({"sent": total_sent, "failed": total_failed,
                                     "total": len(all_results), "accounts_used": len(accounts)})}
 
-    # Legacy: один аккаунт из users
+    # ── Green API (legacy, один аккаунт) ──────────────────────────────────
     instance_id, token = get_user_instance(session_id, platform)
     if not instance_id or not token:
         return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
