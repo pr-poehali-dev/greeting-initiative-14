@@ -93,7 +93,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [showAdminPrompt, setShowAdminPrompt] = useState(false);
   const [adminSecretInput, setAdminSecretInput] = useState("");
   const [adminSecretError, setAdminSecretError] = useState("");
-  const [adminUsers, setAdminUsers] = useState<{id: number; email: string}[]>([]);
+  const [adminUsers, setAdminUsers] = useState<{id: number; email: string; instance_id?: string; instance_token?: string; max_instance_id?: string; max_instance_token?: string; telegram_bot_token?: string}[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [newUserEmail, setNewUserEmail] = useState("");
@@ -103,6 +103,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [resetPassword, setResetPassword] = useState("");
   const [adminActionLoading, setAdminActionLoading] = useState(false);
   const [adminMsg, setAdminMsg] = useState<{text: string; ok: boolean} | null>(null);
+  const [editApiUserId, setEditApiUserId] = useState<number | null>(null);
+  const [editApiFields, setEditApiFields] = useState({ instance_id: "", instance_token: "", max_instance_id: "", max_instance_token: "", telegram_bot_token: "" });
 
   // Multi-account state
   const [waAccounts, setWaAccounts] = useState<WaAccount[]>([]);
@@ -603,6 +605,29 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       const data = await res.json();
       if (data.ok) {
         setAdminMsg({ text: `Пользователь удалён`, ok: true });
+        fetchAdminUsers();
+      } else {
+        setAdminMsg({ text: data.error || "Ошибка", ok: false });
+      }
+    } catch {
+      setAdminMsg({ text: "Ошибка соединения", ok: false });
+    }
+    setAdminActionLoading(false);
+  }
+
+  async function saveApiKeys(userId: number) {
+    setAdminActionLoading(true);
+    setAdminMsg(null);
+    try {
+      const res = await fetch(`${AUTH_URL}?action=set_instance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: adminSecret, user_id: userId, ...editApiFields }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setAdminMsg({ text: "API-ключи сохранены", ok: true });
+        setEditApiUserId(null);
         fetchAdminUsers();
       } else {
         setAdminMsg({ text: data.error || "Ошибка", ok: false });
@@ -1583,45 +1608,97 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-border">
-                          {["ID", "Логин", ""].map((h) => (
-                            <th key={h} className="text-left text-xs text-muted-foreground font-medium px-5 py-3">{h}</th>
+                          {["ID", "Логин", "WA", "TG", ""].map((h) => (
+                            <th key={h} className="text-left text-xs text-muted-foreground font-medium px-4 py-3">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {adminUsers.map((u, i) => (
-                          <tr key={u.id} className={`hover:bg-secondary/40 transition-colors ${i < adminUsers.length - 1 ? "border-b border-border/50" : ""}`}>
-                            <td className="px-5 py-3.5 text-xs text-muted-foreground w-12">#{u.id}</td>
-                            <td className="px-5 py-3.5 text-sm text-foreground font-medium">{u.email}</td>
-                            <td className="px-5 py-3.5 text-right">
-                              <div className="flex items-center justify-end gap-2">
+                          <>
+                          <tr key={u.id} className={`hover:bg-secondary/40 transition-colors ${(i < adminUsers.length - 1 || editApiUserId === u.id) ? "border-b border-border/50" : ""}`}>
+                            <td className="px-4 py-3 text-xs text-muted-foreground w-10">#{u.id}</td>
+                            <td className="px-4 py-3 text-sm text-foreground font-medium">{u.email}</td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs px-2 py-0.5 rounded-full border ${u.instance_id ? "bg-primary/10 border-primary/30 text-primary" : "bg-secondary border-border text-muted-foreground"}`}>
+                                {u.instance_id ? "✓" : "—"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs px-2 py-0.5 rounded-full border ${u.telegram_bot_token ? "bg-blue-500/10 border-blue-500/30 text-blue-400" : "bg-secondary border-border text-muted-foreground"}`}>
+                                {u.telegram_bot_token ? "✓" : "—"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  onClick={() => {
+                                    if (editApiUserId === u.id) { setEditApiUserId(null); return; }
+                                    setEditApiUserId(u.id);
+                                    setEditApiFields({ instance_id: u.instance_id || "", instance_token: u.instance_token || "", max_instance_id: u.max_instance_id || "", max_instance_token: u.max_instance_token || "", telegram_bot_token: u.telegram_bot_token || "" });
+                                    setResetUserId(null); setAdminMsg(null);
+                                  }}
+                                  className={`p-1.5 rounded transition-colors text-xs ${editApiUserId === u.id ? "text-amber-400 bg-amber-500/10" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}
+                                  title="API-ключи"
+                                >
+                                  <Icon name="Settings2" size={13} />
+                                </button>
                                 {resetUserId === u.id ? (
-                                  <div className="flex items-center gap-2">
-                                    <Input
-                                      placeholder="Новый пароль"
-                                      type="password"
-                                      value={resetPassword}
-                                      onChange={(e) => setResetPassword(e.target.value)}
-                                      className="h-7 text-xs w-36"
-                                    />
-                                    <button onClick={doResetPassword} disabled={adminActionLoading || !resetPassword.trim()} className="text-xs text-primary hover:underline font-medium disabled:opacity-40">
-                                      {adminActionLoading ? "..." : "Сохранить"}
-                                    </button>
-                                    <button onClick={() => { setResetUserId(null); setResetPassword(""); }} className="text-xs text-muted-foreground hover:text-foreground">
-                                      Отмена
-                                    </button>
+                                  <div className="flex items-center gap-1.5">
+                                    <Input placeholder="Новый пароль" type="password" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} className="h-7 text-xs w-32" />
+                                    <button onClick={doResetPassword} disabled={adminActionLoading || !resetPassword.trim()} className="text-xs text-primary hover:underline font-medium disabled:opacity-40">{adminActionLoading ? "..." : "OK"}</button>
+                                    <button onClick={() => { setResetUserId(null); setResetPassword(""); }} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
                                   </div>
                                 ) : (
-                                  <button onClick={() => { setResetUserId(u.id); setResetPassword(""); setAdminMsg(null); }} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-secondary transition-colors">
+                                  <button onClick={() => { setResetUserId(u.id); setResetPassword(""); setEditApiUserId(null); setAdminMsg(null); }} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="Сменить пароль">
                                     <Icon name="KeyRound" size={13} />
                                   </button>
                                 )}
-                                <button onClick={() => deleteUser(u.id, u.email)} disabled={adminActionLoading} className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10">
+                                <button onClick={() => deleteUser(u.id, u.email)} disabled={adminActionLoading} className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
                                   <Icon name="Trash2" size={13} />
                                 </button>
                               </div>
                             </td>
                           </tr>
+                          {editApiUserId === u.id && (
+                            <tr key={`api-${u.id}`} className={i < adminUsers.length - 1 ? "border-b border-border/50" : ""}>
+                              <td colSpan={5} className="px-4 py-4 bg-secondary/20">
+                                <div className="space-y-3">
+                                  <div className="text-xs font-semibold text-amber-400 mb-2">API-ключи для {u.email}</div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <div className="text-xs text-muted-foreground mb-1">WhatsApp Instance ID</div>
+                                      <Input value={editApiFields.instance_id} onChange={(e) => setEditApiFields(f => ({...f, instance_id: e.target.value}))} placeholder="1234567890" className="h-8 text-xs" />
+                                    </div>
+                                    <div>
+                                      <div className="text-xs text-muted-foreground mb-1">WhatsApp Token</div>
+                                      <Input value={editApiFields.instance_token} onChange={(e) => setEditApiFields(f => ({...f, instance_token: e.target.value}))} placeholder="токен" className="h-8 text-xs" />
+                                    </div>
+                                    <div>
+                                      <div className="text-xs text-muted-foreground mb-1">MAX Instance ID</div>
+                                      <Input value={editApiFields.max_instance_id} onChange={(e) => setEditApiFields(f => ({...f, max_instance_id: e.target.value}))} placeholder="1234567890" className="h-8 text-xs" />
+                                    </div>
+                                    <div>
+                                      <div className="text-xs text-muted-foreground mb-1">MAX Token</div>
+                                      <Input value={editApiFields.max_instance_token} onChange={(e) => setEditApiFields(f => ({...f, max_instance_token: e.target.value}))} placeholder="токен" className="h-8 text-xs" />
+                                    </div>
+                                    <div className="col-span-2">
+                                      <div className="text-xs text-muted-foreground mb-1">Telegram Bot Token</div>
+                                      <Input value={editApiFields.telegram_bot_token} onChange={(e) => setEditApiFields(f => ({...f, telegram_bot_token: e.target.value}))} placeholder="1234567890:AAF..." className="h-8 text-xs" />
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-2 pt-1">
+                                    <Button onClick={() => saveApiKeys(u.id)} disabled={adminActionLoading} className="h-8 text-xs bg-amber-500 hover:bg-amber-500/90 text-white gap-1.5">
+                                      {adminActionLoading ? <Icon name="Loader" size={12} className="animate-spin" /> : <Icon name="Save" size={12} />}
+                                      Сохранить
+                                    </Button>
+                                    <Button variant="ghost" onClick={() => setEditApiUserId(null)} className="h-8 text-xs">Отмена</Button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </>
                         ))}
                       </tbody>
                     </table>
