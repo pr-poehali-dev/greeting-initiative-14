@@ -661,6 +661,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                       />
                       <Input
                         placeholder="Токен доступа"
+                        type="password"
                         value={newAccToken}
                         onChange={(e) => setNewAccToken(e.target.value)}
                         className="h-9 text-sm font-mono"
