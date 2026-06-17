@@ -1683,42 +1683,46 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 </div>
               )}
 
-              {/* WhatsApp / MAX — группы */}
-              {platform !== "telegram" && (
-                <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-foreground">Выберите группы получателей</div>
-                    {groups.filter((g) => g.active).length > 0 && (
-                      <button onClick={() => { const ids = groups.filter((g) => g.active).map((g) => g.id); setSelectedGroups(selectedGroups.length === ids.length ? [] : ids); }}
-                        className="text-xs text-primary hover:underline">
-                        {selectedGroups.length === groups.filter((g) => g.active).length ? "Снять всё" : "Отметить всё"}
-                      </button>
+              {/* WhatsApp / MAX / Whapi — группы */}
+              {platform !== "telegram" && (() => {
+                const platTag = platform === "max" ? "MAX" : platform === "whapi" ? "Whapi" : "WhatsApp";
+                const platGroups = groups.filter((g) => g.active && g.tag === platTag);
+                const platSelectedIds = selectedGroups.filter((id) => platGroups.some((g) => g.id === id));
+                return (
+                  <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold text-foreground">Выберите группы получателей</div>
+                      {platGroups.length > 0 && (
+                        <button onClick={() => { const ids = platGroups.map((g) => g.id); setSelectedGroups(platSelectedIds.length === ids.length ? selectedGroups.filter((id) => !ids.includes(id)) : [...new Set([...selectedGroups, ...ids])]); }}
+                          className="text-xs text-primary hover:underline">
+                          {platSelectedIds.length === platGroups.length ? "Снять всё" : "Отметить всё"}
+                        </button>
+                      )}
+                    </div>
+                    {platGroups.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-4 text-center">
+                        Нет групп. <button onClick={() => setTab("connect")} className="text-primary hover:underline">Подключите аккаунт</button> и импортируйте группы.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {platGroups.map((g) => (
+                          <label key={g.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer border transition-all duration-150 ${selectedGroups.includes(g.id) ? "border-primary/40 bg-primary/5" : "border-border hover:bg-secondary/40"}`}>
+                            <input type="checkbox" checked={selectedGroups.includes(g.id)} onChange={() => toggleGroupSelection(g.id)} className="w-4 h-4 accent-green-500" />
+                            <span className="text-sm text-foreground font-medium flex-1">{g.name}</span>
+                            <span className="text-xs text-muted-foreground">{g.members} участников</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {platSelectedIds.length > 0 && (
+                      <div className="text-xs text-muted-foreground">
+                        Выбрано групп: <span className="text-foreground font-semibold">{platSelectedIds.length}</span> · Получателей:{" "}
+                        <span className="text-foreground font-semibold">{groups.filter((g) => platSelectedIds.includes(g.id)).reduce((s, g) => s + g.members, 0)}</span>
+                      </div>
                     )}
                   </div>
-                  {groups.length === 0 ? (
-                    <div className="text-sm text-muted-foreground py-4 text-center">
-                      Нет групп. <button onClick={() => setTab("connect")} className="text-primary hover:underline">Подключите аккаунт</button> и импортируйте группы.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {groups.filter((g) => g.active).map((g) => (
-                        <label key={g.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer border transition-all duration-150 ${selectedGroups.includes(g.id) ? "border-primary/40 bg-primary/5" : "border-border hover:bg-secondary/40"}`}>
-                          <input type="checkbox" checked={selectedGroups.includes(g.id)} onChange={() => toggleGroupSelection(g.id)} className="w-4 h-4 accent-green-500" />
-                          <span className="text-sm text-foreground font-medium flex-1">{g.name}</span>
-                          <span className="text-xs text-muted-foreground">{g.members} участников</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${tagColors[g.tag] || ""}`}>{g.tag}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  {selectedGroups.length > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      Выбрано групп: <span className="text-foreground font-semibold">{selectedGroups.length}</span> · Получателей:{" "}
-                      <span className="text-foreground font-semibold">{groups.filter((g) => selectedGroups.includes(g.id)).reduce((s, g) => s + g.members, 0)}</span>
-                    </div>
-                  )}
-                </div>
-              )}
+                );
+              })()}
             </div>
           )}
 
