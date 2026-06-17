@@ -619,7 +619,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-medium text-foreground truncate">{acc.name}</div>
                             <div className="text-xs text-muted-foreground">
-                              {acc.status === "connected" ? "Подключён" : "Отключён"} · ID: {acc.instance_id.slice(0, 12)}...
+                              {acc.status === "connected" ? "Подключён" : "Отключён"} · ID: ••••••••••••
                             </div>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
@@ -654,13 +654,13 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                         className="h-9 text-sm"
                       />
                       <Input
-                        placeholder="Instance ID (из Green API)"
+                        placeholder="Идентификатор инстанса"
                         value={newAccInstance}
                         onChange={(e) => setNewAccInstance(e.target.value)}
                         className="h-9 text-sm font-mono"
                       />
                       <Input
-                        placeholder="Token (из Green API)"
+                        placeholder="Токен доступа"
                         value={newAccToken}
                         onChange={(e) => setNewAccToken(e.target.value)}
                         className="h-9 text-sm font-mono"
@@ -1425,7 +1425,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                       { n: 1, text: "Перейдите в раздел Подключение → выберите вкладку WhatsApp или MAX" },
                       { n: 2, text: "В блоке «Аккаунты» нажмите «+ Добавить»" },
                       { n: 3, text: "Введите название аккаунта (например: «Основной» или «Запасной»)" },
-                      { n: 4, text: "Введите Instance ID и Token из вашего личного кабинета Green API (green-api.com)" },
+                      { n: 4, text: "Введите идентификатор инстанса и токен доступа из личного кабинета сервиса" },
                       { n: 5, text: "Нажмите «Добавить», затем «Подключить» — отсканируйте QR на телефоне" },
                       { n: 6, text: "Повторите для каждого дополнительного аккаунта" },
                     ].map((item) => (
