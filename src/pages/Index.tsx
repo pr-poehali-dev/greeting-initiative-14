@@ -94,7 +94,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [showAdminPrompt, setShowAdminPrompt] = useState(false);
   const [adminSecretInput, setAdminSecretInput] = useState("");
   const [adminSecretError, setAdminSecretError] = useState("");
-  const [adminUsers, setAdminUsers] = useState<{id: number; email: string; instance_id?: string; instance_token?: string; max_instance_id?: string; max_instance_token?: string; telegram_bot_token?: string}[]>([]);
+  const [adminUsers, setAdminUsers] = useState<{id: number; email: string; instance_id?: string; instance_token?: string; max_instance_id?: string; max_instance_token?: string; telegram_bot_token?: string; whapi_token?: string}[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [newUserEmail, setNewUserEmail] = useState("");
@@ -105,7 +105,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [adminActionLoading, setAdminActionLoading] = useState(false);
   const [adminMsg, setAdminMsg] = useState<{text: string; ok: boolean} | null>(null);
   const [editApiUserId, setEditApiUserId] = useState<number | null>(null);
-  const [editApiFields, setEditApiFields] = useState({ instance_id: "", instance_token: "", max_instance_id: "", max_instance_token: "", telegram_bot_token: "" });
+  const [editApiFields, setEditApiFields] = useState({ instance_id: "", instance_token: "", max_instance_id: "", max_instance_token: "", telegram_bot_token: "", whapi_token: "" });
 
   // Multi-account state
   const [waAccounts, setWaAccounts] = useState<WaAccount[]>([]);
@@ -1811,7 +1811,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                                   onClick={() => {
                                     if (editApiUserId === u.id) { setEditApiUserId(null); return; }
                                     setEditApiUserId(u.id);
-                                    setEditApiFields({ instance_id: u.instance_id || "", instance_token: u.instance_token || "", max_instance_id: u.max_instance_id || "", max_instance_token: u.max_instance_token || "", telegram_bot_token: u.telegram_bot_token || "" });
+                                    setEditApiFields({ instance_id: u.instance_id || "", instance_token: u.instance_token || "", max_instance_id: u.max_instance_id || "", max_instance_token: u.max_instance_token || "", telegram_bot_token: u.telegram_bot_token || "", whapi_token: u.whapi_token || "" });
                                     setResetUserId(null); setAdminMsg(null);
                                   }}
                                   className={`p-1.5 rounded transition-colors text-xs ${editApiUserId === u.id ? "text-amber-400 bg-amber-500/10" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}
@@ -1861,6 +1861,10 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                                     <div className="col-span-2">
                                       <div className="text-xs text-muted-foreground mb-1">Telegram Bot Token</div>
                                       <Input value={editApiFields.telegram_bot_token} onChange={(e) => setEditApiFields(f => ({...f, telegram_bot_token: e.target.value}))} placeholder="1234567890:AAF..." className="h-8 text-xs" />
+                                    </div>
+                                    <div className="col-span-2">
+                                      <div className="text-xs text-muted-foreground mb-1">Whapi Token</div>
+                                      <Input value={editApiFields.whapi_token} onChange={(e) => setEditApiFields(f => ({...f, whapi_token: e.target.value}))} placeholder="токен Whapi.cloud" className="h-8 text-xs" />
                                     </div>
                                   </div>
                                   <div className="flex gap-2 pt-1">
