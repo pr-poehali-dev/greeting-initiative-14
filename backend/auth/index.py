@@ -45,9 +45,8 @@ def handler(event: dict, context) -> dict:
 
     if action == "list_users":
         secret = body.get("secret", "")
-        print(f"DEBUG list_users: got='{secret}' expected='{admin_secret}' match={secret == admin_secret}")
         if secret != admin_secret:
-            return json_response({"error": "Forbidden", "debug_got": repr(secret), "debug_expected": repr(admin_secret)}, 403)
+            return json_response({"error": "Forbidden"}, 403)
         cur.execute(f"SELECT id, email, green_api_instance_id, green_api_token, max_api_instance_id, max_api_token, telegram_bot_token FROM {SCHEMA}.users ORDER BY id")
         rows = cur.fetchall()
         return json_response({"users": [{"id": r[0], "email": r[1], "instance_id": r[2] or "", "instance_token": r[3] or "", "max_instance_id": r[4] or "", "max_instance_token": r[5] or "", "telegram_bot_token": r[6] or ""} for r in rows]})
