@@ -479,7 +479,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       return;
     }
 
-    const targetGroups = groups.filter((g) => selectedGroups.includes(g.id) && g.waId);
+    const platformTag = platform === "max" ? "MAX" : platform === "whapi" ? "Whapi" : "WhatsApp";
+    const targetGroups = groups.filter((g) => selectedGroups.includes(g.id) && g.waId && g.tag === platformTag);
     if (targetGroups.length === 0) return;
     setSending(true);
     setSendResult(null);
