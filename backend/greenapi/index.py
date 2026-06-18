@@ -309,6 +309,63 @@ def handler(event: dict, context) -> dict:
         return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                 "body": json.dumps({"groups": groups, "total": len(groups)})}
 
+    # ── load_groups / save_groups — не требуют instance_id ──────────────
+
+    if action == "load_groups":
+        """Загружает сохранённые группы пользователя из БД."""
+        user_id = get_user_id(session_id)
+        if not user_id:
+            return {"statusCode": 401, "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"error": "no_session", "groups": []})}
+        try:
+            db = psycopg2.connect(os.environ["DATABASE_URL"])
+            cur = db.cursor()
+            cur.execute(
+                f"SELECT id, instance_id, name, members, active, tag, wa_id FROM {SCHEMA}.groups WHERE user_id=%s ORDER BY id ASC",
+                (user_id,)
+            )
+            rows = cur.fetchall()
+            db.close()
+            groups_list = [
+                {"id": r[0], "instance_id": r[1], "name": r[2], "members": r[3], "active": r[4], "tag": r[5], "waId": r[6]}
+                for r in rows
+            ]
+            return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"groups": groups_list})}
+        except Exception as e:
+            print(f"[greenapi] load_groups error: {e}")
+            return {"statusCode": 500, "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"error": str(e), "groups": []})}
+
+    if action == "save_groups":
+        """Сохраняет список групп пользователя в БД (заменяет старые для данного instance_id и tag)."""
+        user_id = get_user_id(session_id)
+        if not user_id:
+            return {"statusCode": 401, "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"error": "no_session"})}
+        body_raw = event.get("body") or "{}"
+        body = json.loads(body_raw) if isinstance(body_raw, str) else body_raw
+        groups_data = body.get("groups", [])
+        tag = body.get("tag", "WhatsApp")
+        inst = body.get("instance_id", "")
+        try:
+            db = psycopg2.connect(os.environ["DATABASE_URL"])
+            cur = db.cursor()
+            cur.execute(f"DELETE FROM {SCHEMA}.groups WHERE user_id=%s AND instance_id=%s AND tag=%s", (user_id, inst, tag))
+            for g in groups_data:
+                cur.execute(
+                    f"INSERT INTO {SCHEMA}.groups (user_id, instance_id, name, members, active, tag, wa_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (user_id, inst, g.get("name",""), g.get("members", 0), g.get("active", True), tag, g.get("waId",""))
+                )
+            db.commit()
+            db.close()
+            return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"ok": True})}
+        except Exception as e:
+            print(f"[greenapi] save_groups error: {e}")
+            return {"statusCode": 500, "headers": {**cors, "Content-Type": "application/json"},
+                    "body": json.dumps({"error": str(e)})}
+
     # ── Старые экшены (обратная совместимость) ────────────────────────────
 
     instance_id, token = get_user_instance(session_id, platform)

@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS t_p54486869_greeting_initiative_.groups (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    instance_id VARCHAR(255) NOT NULL DEFAULT '',
+    name VARCHAR(500) NOT NULL,
+    members INTEGER NOT NULL DEFAULT 0,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    tag VARCHAR(100) NOT NULL DEFAULT 'WhatsApp',
+    wa_id VARCHAR(500) NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT NOW()
+);

@@ -158,6 +158,20 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     }
   }, [tab, platform]);
 
+  // Загружаем группы из БД при старте
+  useEffect(() => {
+    async function loadGroups() {
+      try {
+        const res = await fetch(`${GREENAPI_URL}?action=load_groups`, { headers: apiHeaders });
+        const data = await res.json();
+        if (data.groups && data.groups.length > 0) {
+          setGroups(data.groups);
+        }
+      } catch { /* ignore */ }
+    }
+    loadGroups();
+  }, [sessionId]);
+
   // Polling для WA/MAX QR
   useEffect(() => {
     const activeStatus = platform === "max" ? maxStatus : waStatus;
@@ -275,6 +289,25 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     }
   }
 
+  async function saveGroupsToDB(allGroups: Group[]) {
+    const byTagInstance = new Map<string, Group[]>();
+    for (const g of allGroups) {
+      const key = `${g.tag}||${(g as Group & {instance_id?: string}).instance_id || ""}`;
+      if (!byTagInstance.has(key)) byTagInstance.set(key, []);
+      byTagInstance.get(key)!.push(g);
+    }
+    for (const [key, grps] of byTagInstance.entries()) {
+      const [tag, inst] = key.split("||");
+      try {
+        await fetch(`${GREENAPI_URL}?action=save_groups`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+          body: JSON.stringify({ groups: grps, tag, instance_id: inst }),
+        });
+      } catch { /* ignore */ }
+    }
+  }
+
   function importWhapiGroups() {
     const toAdd = whapiGroups
       .filter((g) => whapiSelectedGroups.includes(g.id))
@@ -289,7 +322,9 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setGroups((prev) => {
       const existingIds = new Set(prev.map((g) => g.waId).filter(Boolean));
       const fresh = toAdd.filter((g) => !existingIds.has(g.waId));
-      return [...prev, ...fresh];
+      const next = [...prev, ...fresh];
+      saveGroupsToDB(next);
+      return next;
     });
     setWhapiSelectedGroups([]);
     setTab("groups");
@@ -532,7 +567,9 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setGroups((prev) => {
       const existingIds = new Set(prev.map((g) => g.waId).filter(Boolean));
       const fresh = toAdd.filter((g) => !existingIds.has(g.waId));
-      return [...prev, ...fresh];
+      const next = [...prev, ...fresh];
+      saveGroupsToDB(next);
+      return next;
     });
     setSelectedWaGroups([]);
     setTab("groups");
@@ -552,7 +589,9 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setGroups((prev) => {
       const existingIds = new Set(prev.map((g) => g.waId).filter(Boolean));
       const fresh = toAdd.filter((g) => !existingIds.has(g.waId));
-      return [...prev, ...fresh];
+      const next = [...prev, ...fresh];
+      saveGroupsToDB(next);
+      return next;
     });
     setTgSelectedGroups([]);
     setTab("groups");
@@ -574,7 +613,11 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   }
 
   function deleteGroup(id: number) {
-    setGroups((prev) => prev.filter((g) => g.id !== id));
+    setGroups((prev) => {
+      const next = prev.filter((g) => g.id !== id);
+      saveGroupsToDB(next);
+      return next;
+    });
   }
 
   async function verifyAdminSecret() {
