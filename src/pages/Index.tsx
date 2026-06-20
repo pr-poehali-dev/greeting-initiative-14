@@ -42,6 +42,7 @@ interface Group {
   active: boolean;
   tag: string;
   waId?: string;
+  instance_id?: string;
 }
 
 const mockContacts = [

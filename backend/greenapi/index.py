@@ -312,7 +312,7 @@ def handler(event: dict, context) -> dict:
     # ── load_groups / save_groups — не требуют instance_id ──────────────
 
     if action == "load_groups":
-        """Загружает сохранённые группы пользователя из БД."""
+        """Загружает сохранённые группы пользователя из БД, фильтруя по его instance_id."""
         user_id = get_user_id(session_id)
         if not user_id:
             return {"statusCode": 401, "headers": {**cors, "Content-Type": "application/json"},
@@ -320,16 +320,35 @@ def handler(event: dict, context) -> dict:
         try:
             db = psycopg2.connect(os.environ["DATABASE_URL"])
             cur = db.cursor()
+            # Получаем все instance_id пользователя (основной WA, MAX, мультиаккаунты)
+            cur.execute(
+                f"SELECT green_api_instance_id, max_api_instance_id FROM {SCHEMA}.users WHERE id=%s",
+                (user_id,)
+            )
+            urow = cur.fetchone()
+            user_instances = set()
+            if urow:
+                if urow[0]: user_instances.add(urow[0].strip())
+                if urow[1]: user_instances.add(urow[1].strip())
+            cur.execute(
+                f"SELECT instance_id FROM {SCHEMA}.wa_accounts WHERE user_id=%s",
+                (user_id,)
+            )
+            for r in cur.fetchall():
+                if r[0]: user_instances.add(r[0].strip())
+            # Загружаем только группы принадлежащие этим инстансам (или без инстанса — legacy)
             cur.execute(
                 f"SELECT id, instance_id, name, members, active, tag, wa_id FROM {SCHEMA}.groups WHERE user_id=%s ORDER BY id ASC",
                 (user_id,)
             )
             rows = cur.fetchall()
             db.close()
-            groups_list = [
-                {"id": r[0], "instance_id": r[1], "name": r[2], "members": r[3], "active": r[4], "tag": r[5], "waId": r[6]}
-                for r in rows
-            ]
+            groups_list = []
+            for r in rows:
+                inst = r[1] or ""
+                # Включаем если инстанс пустой (старые данные) или принадлежит пользователю
+                if not inst or inst in user_instances:
+                    groups_list.append({"id": r[0], "instance_id": inst, "name": r[2], "members": r[3], "active": r[4], "tag": r[5], "waId": r[6]})
             return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                     "body": json.dumps({"groups": groups_list})}
         except Exception as e:
@@ -348,6 +367,22 @@ def handler(event: dict, context) -> dict:
         groups_data = body.get("groups", [])
         tag = body.get("tag", "WhatsApp")
         inst = body.get("instance_id", "")
+        # Если instance_id не передан — берём из профиля пользователя
+        if not inst:
+            try:
+                db2 = psycopg2.connect(os.environ["DATABASE_URL"])
+                cur2 = db2.cursor()
+                plat_for_inst = "max" if tag == "MAX" else "whatsapp"
+                if plat_for_inst == "max":
+                    cur2.execute(f"SELECT max_api_instance_id FROM {SCHEMA}.users WHERE id=%s", (user_id,))
+                else:
+                    cur2.execute(f"SELECT green_api_instance_id FROM {SCHEMA}.users WHERE id=%s", (user_id,))
+                row2 = cur2.fetchone()
+                db2.close()
+                if row2 and row2[0]:
+                    inst = row2[0].strip()
+            except Exception as e2:
+                print(f"[greenapi] save_groups get_inst error: {e2}")
         try:
             db = psycopg2.connect(os.environ["DATABASE_URL"])
             cur = db.cursor()
