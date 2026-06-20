@@ -1438,6 +1438,17 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                       Импорт из WhatsApp
                     </Button>
                   )}
+                  {groups.length > 0 && (
+                    <Button size="sm" variant="outline" className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={() => {
+                      if (confirm("Удалить все группы из списка?")) {
+                        setGroups([]);
+                        saveGroupsToDB([]);
+                      }
+                    }}>
+                      <Icon name="Trash2" size={13} />
+                      Очистить всё
+                    </Button>
+                  )}
                   <Button size="sm" className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setShowAddGroup((v) => !v)}>
                     <Icon name="Plus" size={14} />
                     Добавить
