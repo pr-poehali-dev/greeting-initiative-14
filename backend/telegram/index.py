@@ -113,12 +113,19 @@ def handler(event: dict, context) -> dict:
             return json_response({"error": "no_token"})
         text = (body.get("text") or "").strip()
         chat_ids = body.get("chat_ids", [])
-        if not text or not chat_ids:
-            return json_response({"error": "text и chat_ids обязательны"}, 400)
+        image_url = (body.get("image_url") or "").strip()
+        if (not text and not image_url) or not chat_ids:
+            return json_response({"error": "text/image_url и chat_ids обязательны"}, 400)
         sent = 0
         failed = 0
         for i, chat_id in enumerate(chat_ids):
-            res = tg_post(bot_token, "sendMessage", {"chat_id": int(chat_id), "text": text})
+            if image_url:
+                payload = {"chat_id": int(chat_id), "photo": image_url}
+                if text:
+                    payload["caption"] = text
+                res = tg_post(bot_token, "sendPhoto", payload)
+            else:
+                res = tg_post(bot_token, "sendMessage", {"chat_id": int(chat_id), "text": text})
             if res.get("ok"):
                 sent += 1
                 print(f"[telegram] OK chat={chat_id}")

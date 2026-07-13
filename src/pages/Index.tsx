@@ -10,6 +10,7 @@ const AUTH_URL = "https://functions.poehali.dev/cf07907b-f87d-40a4-a63c-82694338
 const SEND_URL = "https://functions.poehali.dev/3c368aad-a7c2-4a91-9095-ac1a47fe77c9";
 const TELEGRAM_URL = "https://functions.poehali.dev/97d4798c-1a93-44d3-9fdc-40acf141a66b";
 const WHAPI_URL = "https://functions.poehali.dev/f6a3c6b6-03f7-4150-b586-7cf660c83ced";
+const UPLOAD_URL = "https://functions.poehali.dev/168495aa-6a87-499f-8375-61b74d3dcef3";
 
 type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect" | "help" | "users";
 type WaStatus = "disconnected" | "loading" | "qr" | "connected";
@@ -76,6 +77,10 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [sending, setSending] = useState(false);
   const [sendProgress, setSendProgress] = useState<{ done: number; total: number } | null>(null);
   const [sendResult, setSendResult] = useState<{ sent: number; failed: number; total: number } | null>(null);
+  const [broadcastImagePreview, setBroadcastImagePreview] = useState<string | null>(null);
+  const [broadcastImageUrl, setBroadcastImageUrl] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupTag, setNewGroupTag] = useState("Клиенты");
@@ -487,8 +492,45 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     }
   }
 
+  async function uploadBroadcastImage(file: File) {
+    setUploadError(null);
+    setUploadingImage(true);
+    try {
+      const reader = new FileReader();
+      const base64: string = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      setBroadcastImagePreview(base64);
+      const res = await fetch(UPLOAD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_data: base64, file_name: file.name, content_type: file.type || "image/jpeg" }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        setBroadcastImageUrl(data.url);
+      } else {
+        setUploadError(data.error || "Не удалось загрузить фото");
+        setBroadcastImagePreview(null);
+      }
+    } catch {
+      setUploadError("Ошибка загрузки фото");
+      setBroadcastImagePreview(null);
+    } finally {
+      setUploadingImage(false);
+    }
+  }
+
+  function removeBroadcastImage() {
+    setBroadcastImagePreview(null);
+    setBroadcastImageUrl(null);
+    setUploadError(null);
+  }
+
   async function sendBroadcast() {
-    if (!broadcastText.trim()) return;
+    if (!broadcastText.trim() && !broadcastImageUrl) return;
 
     if (platform === "telegram") {
       if (tgSelectedGroups.length === 0) return;
@@ -502,7 +544,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
           const res = await fetch(`${TELEGRAM_URL}?action=send`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
-            body: JSON.stringify({ text: broadcastText, chat_ids: batch }),
+            body: JSON.stringify({ text: broadcastText, chat_ids: batch, image_url: broadcastImageUrl || undefined }),
           });
           const data = await res.json();
           totalSent += data.sent ?? 0;
@@ -512,6 +554,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       }
       setSendResult({ sent: totalSent, failed: totalFailed, total: tgSelectedGroups.length });
       setSendProgress(null); setSending(false);
+      removeBroadcastImage();
       return;
     }
 
@@ -535,7 +578,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
         const res = await fetch(`${SEND_URL}?platform=${platform}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
-          body: JSON.stringify({ text: broadcastText, group_ids: batch, multi_account: waAccounts.length > 0 }),
+          body: JSON.stringify({ text: broadcastText, group_ids: batch, multi_account: waAccounts.length > 0, image_url: broadcastImageUrl || undefined }),
           signal: controller.signal,
         });
         clearTimeout(timeout);
@@ -551,6 +594,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     setSendResult({ sent: totalSent, failed: totalFailed, total: allIds.length });
     setSendProgress(null);
     setSending(false);
+    removeBroadcastImage();
   }
 
   function importSelectedGroups(plat: Platform = "whatsapp") {
@@ -1650,13 +1694,42 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                     <span>{broadcastText.length} символов</span>
                     {broadcastText.length > 0 && <span className="text-primary">Готово к отправке</span>}
                   </div>
+
+                  {/* Фото к рассылке */}
+                  <div className="pt-2 border-t border-border/60">
+                    <div className="text-sm font-semibold text-foreground mb-2">Фото (необязательно)</div>
+                    {broadcastImagePreview ? (
+                      <div className="relative inline-block">
+                        <img src={broadcastImagePreview} alt="Превью" className="max-h-40 rounded-lg border border-border object-cover" />
+                        {uploadingImage && (
+                          <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
+                            <Icon name="Loader" size={20} className="animate-spin text-white" />
+                          </div>
+                        )}
+                        {!uploadingImage && (
+                          <button onClick={removeBroadcastImage}
+                            className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-destructive text-white flex items-center justify-center shadow hover:bg-destructive/90">
+                            <Icon name="X" size={13} />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <label className="flex items-center gap-2 w-fit px-4 py-2.5 rounded-lg border border-dashed border-border text-sm text-muted-foreground cursor-pointer hover:border-primary/40 hover:text-foreground transition-colors">
+                        <Icon name="Image" size={16} />
+                        Прикрепить фото
+                        <input type="file" accept="image/*" className="hidden"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBroadcastImage(f); e.target.value = ""; }} />
+                      </label>
+                    )}
+                    {uploadError && <div className="text-xs text-destructive mt-2">{uploadError}</div>}
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-3 pt-10">
                   <Button
                     onClick={sendBroadcast}
                     disabled={
-                      !broadcastText.trim() || sending ||
+                      (!broadcastText.trim() && !broadcastImageUrl) || sending || uploadingImage ||
                       (platform === "telegram" ? tgStatus !== "connected" || tgSelectedGroups.length === 0 :
                        platform === "max" ? (maxStatus !== "connected" && waAccounts.length === 0) || selectedGroups.length === 0 :
                        (waStatus !== "connected" && waAccounts.length === 0) || selectedGroups.length === 0)

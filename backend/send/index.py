@@ -102,6 +102,31 @@ def send_message(instance_id: str, token: str, group_id: str, text: str) -> dict
         return {"ok": False, "group_id": group_id, "error": str(ex)}
 
 
+def send_file(instance_id: str, token: str, group_id: str, text: str, file_url: str) -> dict:
+    """Отправляет фото с подписью в группу через Green API (sendFileByUrl)."""
+    url = f"{BASE_URL}/waInstance{instance_id}/sendFileByUrl/{token}"
+    file_name = file_url.rsplit("/", 1)[-1] or "photo.jpg"
+    payload = json.dumps({
+        "chatId": group_id,
+        "urlFile": file_url,
+        "fileName": file_name,
+        "caption": text,
+    }).encode()
+    req = urllib.request.Request(url, data=payload, method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+            print(f"[send] OK(file) group={group_id} id={data.get('idMessage', '?')}")
+            return {"ok": True, "group_id": group_id}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"[send] HTTP {e.code} group={group_id}: {body[:200]}")
+        return {"ok": False, "group_id": group_id, "error": f"HTTP {e.code}"}
+    except Exception as ex:
+        print(f"[send] Exception group={group_id}: {ex}")
+        return {"ok": False, "group_id": group_id, "error": str(ex)}
+
+
 def send_message_whapi(token: str, group_id: str, text: str) -> dict:
     """Отправляет сообщение в группу через Whapi.cloud."""
     url = f"{WHAPI_BASE}/messages/text"
@@ -117,6 +142,31 @@ def send_message_whapi(token: str, group_id: str, text: str) -> dict:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode())
             print(f"[send/whapi] OK group={group_id} id={data.get('id', '?')}")
+            return {"ok": True, "group_id": group_id}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"[send/whapi] HTTP {e.code} group={group_id}: {body[:200]}")
+        return {"ok": False, "group_id": group_id, "error": f"HTTP {e.code}"}
+    except Exception as ex:
+        print(f"[send/whapi] Exception group={group_id}: {ex}")
+        return {"ok": False, "group_id": group_id, "error": str(ex)}
+
+
+def send_file_whapi(token: str, group_id: str, text: str, file_url: str) -> dict:
+    """Отправляет фото с подписью в группу через Whapi.cloud."""
+    url = f"{WHAPI_BASE}/messages/image"
+    payload = json.dumps({"to": group_id, "media": file_url, "caption": text}).encode()
+    req = urllib.request.Request(
+        url, data=payload, method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+            print(f"[send/whapi] OK(file) group={group_id} id={data.get('id', '?')}")
             return {"ok": True, "group_id": group_id}
     except urllib.error.HTTPError as e:
         body = e.read().decode()
@@ -145,12 +195,13 @@ def handler(event: dict, context) -> dict:
 
     text = (body.get("text") or "").strip()
     group_ids = body.get("group_ids", [])
+    image_url = (body.get("image_url") or "").strip()
     # multi_account=true — отправить со всех аккаунтов
     multi = body.get("multi_account", False)
 
-    if not text:
+    if not text and not image_url:
         return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"},
-                "body": json.dumps({"error": "Текст сообщения обязателен"})}
+                "body": json.dumps({"error": "Текст сообщения или фото обязательны"})}
     if not group_ids:
         return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"},
                 "body": json.dumps({"error": "Выберите хотя бы одну группу"})}
@@ -163,7 +214,10 @@ def handler(event: dict, context) -> dict:
                     "body": json.dumps({"error": "Токен Whapi не назначен. Обратитесь к администратору."})}
         results = []
         for i, group_id in enumerate(group_ids):
-            result = send_message_whapi(whapi_token, group_id, text)
+            if image_url:
+                result = send_file_whapi(whapi_token, group_id, text, image_url)
+            else:
+                result = send_message_whapi(whapi_token, group_id, text)
             results.append(result)
             if i < len(group_ids) - 1:
                 time.sleep(2.5)
@@ -188,7 +242,10 @@ def handler(event: dict, context) -> dict:
         for acc_idx, (instance_id, token) in enumerate(accounts):
             acc_groups = [g for i, g in enumerate(group_ids) if i % n == acc_idx]
             for i, group_id in enumerate(acc_groups):
-                result = send_message(instance_id, token, group_id, text)
+                if image_url:
+                    result = send_file(instance_id, token, group_id, text, image_url)
+                else:
+                    result = send_message(instance_id, token, group_id, text)
                 result["account_idx"] = acc_idx
                 all_results.append(result)
                 if i < len(acc_groups) - 1:
@@ -209,7 +266,10 @@ def handler(event: dict, context) -> dict:
 
     results = []
     for i, group_id in enumerate(group_ids):
-        result = send_message(instance_id, token, group_id, text)
+        if image_url:
+            result = send_file(instance_id, token, group_id, text, image_url)
+        else:
+            result = send_message(instance_id, token, group_id, text)
         results.append(result)
         if i < len(group_ids) - 1:
             time.sleep(2.5)
