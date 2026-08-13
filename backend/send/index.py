@@ -42,7 +42,7 @@ def get_user_instance(session_id: str, platform: str = "whatsapp") -> tuple:
 
 
 def get_all_accounts(session_id: str, platform: str) -> list:
-    """Возвращает все аккаунты пользователя из wa_accounts."""
+    """Возвращает все ПОДКЛЮЧЁННЫЕ доп. аккаунты пользователя из wa_accounts."""
     if not session_id:
         return []
     try:
@@ -52,7 +52,7 @@ def get_all_accounts(session_id: str, platform: str) -> list:
             SELECT a.instance_id, a.token
             FROM {SCHEMA}.wa_accounts a
             JOIN {SCHEMA}.sessions s ON s.user_id = a.user_id
-            WHERE s.id=%s AND s.expires_at > NOW() AND a.platform=%s
+            WHERE s.id=%s AND s.expires_at > NOW() AND a.platform=%s AND a.status='connected'
         """, (session_id, platform))
         rows = cur.fetchall()
         db.close()
@@ -229,10 +229,9 @@ def handler(event: dict, context) -> dict:
     # ── Green API (multi-account) ──────────────────────────────────────────
     if multi:
         accounts = get_all_accounts(session_id, platform)
-        if not accounts:
-            instance_id, token = get_user_instance(session_id, platform)
-            if instance_id and token:
-                accounts = [(instance_id, token)]
+        main_instance, main_token = get_user_instance(session_id, platform)
+        if main_instance and main_token and (main_instance, main_token) not in accounts:
+            accounts = [(main_instance, main_token)] + accounts
         if not accounts:
             return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                     "body": json.dumps({"error": "Нет подключённых аккаунтов"})}
