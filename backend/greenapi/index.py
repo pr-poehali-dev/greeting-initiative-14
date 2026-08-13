@@ -303,8 +303,8 @@ def handler(event: dict, context) -> dict:
             return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                     "body": json.dumps({"groups": [], "error": str(data)})}
         groups = [
-            {"id": c.get("id", ""), "name": c.get("name", "")}
-            for c in data if c.get("id", "").endswith("@g.us")
+            {"id": c.get("id") or c.get("chatId", ""), "name": c.get("name", "")}
+            for c in data if (c.get("id", "").endswith("@g.us") or c.get("type") == "group")
         ]
         return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                 "body": json.dumps({"groups": groups, "total": len(groups)})}
@@ -444,8 +444,8 @@ def handler(event: dict, context) -> dict:
             return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                     "body": json.dumps({"groups": [], "total": 0, "error": str(data)})}
         groups = [
-            {"id": c.get("id", ""), "name": c.get("name", "")}
-            for c in data if c.get("id", "").endswith("@g.us")
+            {"id": c.get("id") or c.get("chatId", ""), "name": c.get("name", "")}
+            for c in data if (c.get("id", "").endswith("@g.us") or c.get("type") == "group")
         ]
         return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                 "body": json.dumps({"groups": groups, "total": len(groups)})}
