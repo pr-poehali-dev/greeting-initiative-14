@@ -84,6 +84,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupTag, setNewGroupTag] = useState("Клиенты");
+  const [groupsLoadError, setGroupsLoadError] = useState(false);
+  const [groupsLoading, setGroupsLoading] = useState(true);
 
   // WhatsApp / MAX connection state
   const [waStatus, setWaStatus] = useState<WaStatus>("disconnected");
@@ -165,16 +167,23 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   }, [tab, platform]);
 
   // Загружаем группы из БД при старте
-  useEffect(() => {
-    async function loadGroups() {
-      try {
-        const res = await fetch(`${GREENAPI_URL}?action=load_groups`, { headers: apiHeaders });
-        const data = await res.json();
-        if (data.groups && data.groups.length > 0) {
-          setGroups(data.groups);
-        }
-      } catch { /* ignore */ }
+  async function loadGroups() {
+    setGroupsLoading(true);
+    setGroupsLoadError(false);
+    try {
+      const res = await fetch(`${GREENAPI_URL}?action=load_groups`, { headers: apiHeaders });
+      const data = await res.json();
+      if (data.groups) {
+        setGroups(data.groups);
+      }
+    } catch {
+      setGroupsLoadError(true);
+    } finally {
+      setGroupsLoading(false);
     }
+  }
+
+  useEffect(() => {
     loadGroups();
   }, [sessionId]);
 
@@ -1518,7 +1527,21 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 </div>
               )}
 
-              {groups.length === 0 ? (
+              {groupsLoading ? (
+                <div className="rounded-xl border border-border bg-card flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+                  <Icon name="Loader" size={32} className="animate-spin opacity-40" />
+                  <p className="text-sm">Загружаем группы...</p>
+                </div>
+              ) : groupsLoadError ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 flex flex-col items-center justify-center py-20 gap-3">
+                  <Icon name="WifiOff" size={40} className="text-amber-400 opacity-60" />
+                  <p className="text-sm text-amber-300">Не удалось загрузить группы — проблема с соединением</p>
+                  <Button size="sm" variant="outline" onClick={loadGroups} className="mt-2 gap-1.5 border-amber-500/30 text-amber-400 hover:bg-amber-500/10">
+                    <Icon name="RefreshCw" size={13} />
+                    Повторить
+                  </Button>
+                </div>
+              ) : groups.length === 0 ? (
                 <div className="rounded-xl border border-border bg-card flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
                   <Icon name="Users" size={40} className="opacity-20" />
                   <p className="text-sm">Нет групп</p>
