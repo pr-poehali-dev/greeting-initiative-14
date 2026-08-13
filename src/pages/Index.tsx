@@ -1185,8 +1185,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                                   <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
                                     <Icon name="Users" size={13} className="text-muted-foreground" />
                                   </div>
-                                  <span className="text-sm text-foreground font-medium flex-1 truncate">{g.name}</span>
-                                  <span className="text-xs text-muted-foreground shrink-0">{g.members} уч.</span>
+                                  <span className={`text-sm font-medium flex-1 truncate ${g.name ? "text-foreground" : "text-muted-foreground italic"}`}>{g.name || "Без названия"}</span>
+                                  <span className="text-xs text-muted-foreground shrink-0">{g.members ? `${g.members} уч.` : ""}</span>
                                 </label>
                               ))}
                             </div>
