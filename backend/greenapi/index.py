@@ -3,6 +3,7 @@ import json
 import urllib.request
 import urllib.error
 import psycopg2
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p54486869_greeting_initiative_")
 BASE_URL = "https://api.green-api.com"
@@ -114,6 +115,33 @@ def api_post(instance_id: str, token: str, method: str, data: dict) -> tuple:
     except Exception as ex:
         print(f"[greenapi] Exception {method}: {ex}")
         return False, {"exception": str(ex)}
+
+
+def fill_missing_names(instance_id: str, token: str, groups: list) -> list:
+    """Догружает названия групп через getGroupData там, где getChats вернул пустое name (известная особенность Green API)."""
+    missing = [g for g in groups if not g["name"] and g["id"]]
+    if not missing:
+        return groups
+    missing = missing[:15]  # ограничиваем, чтобы не упереться в таймаут функции
+
+    def fetch_name(group_id: str):
+        ok, data = api_post(instance_id, token, "getGroupData", {"groupId": group_id})
+        if ok and isinstance(data, dict):
+            return group_id, data.get("subject", "")
+        return group_id, ""
+
+    names = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(fetch_name, g["id"]) for g in missing]
+        for f in as_completed(futures):
+            gid, subject = f.result()
+            if subject:
+                names[gid] = subject
+
+    for g in groups:
+        if not g["name"] and g["id"] in names:
+            g["name"] = names[g["id"]]
+    return groups
 
 
 def handler(event: dict, context) -> dict:
@@ -306,6 +334,7 @@ def handler(event: dict, context) -> dict:
             {"id": c.get("id") or c.get("chatId", ""), "name": c.get("name", "")}
             for c in data if (c.get("id", "").endswith("@g.us") or c.get("type") == "group")
         ]
+        groups = fill_missing_names(instance_id, token, groups)
         return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                 "body": json.dumps({"groups": groups, "total": len(groups)})}
 
@@ -447,6 +476,7 @@ def handler(event: dict, context) -> dict:
             {"id": c.get("id") or c.get("chatId", ""), "name": c.get("name", "")}
             for c in data if (c.get("id", "").endswith("@g.us") or c.get("type") == "group")
         ]
+        groups = fill_missing_names(instance_id, token, groups)
         return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                 "body": json.dumps({"groups": groups, "total": len(groups)})}
 
