@@ -425,7 +425,16 @@ def handler(event: dict, context) -> dict:
         try:
             db = psycopg2.connect(os.environ["DATABASE_URL"])
             cur = db.cursor()
+            # Удаляем старые записи для этого instance_id/tag
             cur.execute(f"DELETE FROM {SCHEMA}.groups WHERE user_id=%s AND instance_id=%s AND tag=%s", (user_id, inst, tag))
+            # Удаляем legacy-дубли с тем же wa_id, но другим (в т.ч. пустым) instance_id —
+            # иначе старые записи без привязки к аккаунту накапливаются при каждом импорте
+            wa_ids = [g.get("waId", "") for g in deduped if g.get("waId")]
+            if wa_ids:
+                cur.execute(
+                    f"DELETE FROM {SCHEMA}.groups WHERE user_id=%s AND tag=%s AND wa_id = ANY(%s)",
+                    (user_id, tag, wa_ids)
+                )
             for g in deduped:
                 cur.execute(
                     f"INSERT INTO {SCHEMA}.groups (user_id, instance_id, name, members, active, tag, wa_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
