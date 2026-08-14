@@ -349,6 +349,20 @@ def handler(event: dict, context) -> dict:
         try:
             db = psycopg2.connect(os.environ["DATABASE_URL"])
             cur = db.cursor()
+            # Автоочистка дублей: если одна и та же группа (wa_id) сохранена несколько раз,
+            # оставляем самую старую запись, остальные помечаем неактивными
+            cur.execute(f"""
+                UPDATE {SCHEMA}.groups g
+                SET active = false
+                WHERE g.user_id = %s
+                  AND g.wa_id <> ''
+                  AND g.active = true
+                  AND g.id > (
+                      SELECT MIN(g2.id) FROM {SCHEMA}.groups g2
+                      WHERE g2.user_id = g.user_id AND g2.wa_id = g.wa_id AND g2.active = true
+                  )
+            """, (user_id,))
+            db.commit()
             # Получаем все instance_id пользователя (основной WA, MAX, мультиаккаунты)
             cur.execute(
                 f"SELECT green_api_instance_id, max_api_instance_id FROM {SCHEMA}.users WHERE id=%s",

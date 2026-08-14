@@ -1563,8 +1563,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {groups.map((g, i) => (
-                        <tr key={g.id} className={`hover:bg-secondary/40 transition-colors ${i < groups.length - 1 ? "border-b border-border/50" : ""}`}>
+                      {groups.filter((g) => g.active).map((g, i, arr) => (
+                        <tr key={g.id} className={`hover:bg-secondary/40 transition-colors ${i < arr.length - 1 ? "border-b border-border/50" : ""}`}>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
