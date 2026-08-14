@@ -194,7 +194,7 @@ def handler(event: dict, context) -> dict:
             pass
 
     text = (body.get("text") or "").strip()
-    group_ids = body.get("group_ids", [])
+    group_ids = list(dict.fromkeys(body.get("group_ids", [])))  # дедуп с сохранением порядка
     image_url = (body.get("image_url") or "").strip()
     # multi_account=true — отправить со всех аккаунтов
     multi = body.get("multi_account", False)

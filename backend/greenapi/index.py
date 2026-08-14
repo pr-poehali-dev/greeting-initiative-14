@@ -412,11 +412,21 @@ def handler(event: dict, context) -> dict:
                     inst = row2[0].strip()
             except Exception as e2:
                 print(f"[greenapi] save_groups get_inst error: {e2}")
+        # Дедуп по wa_id — защита от повторного добавления одной и той же группы
+        seen_wa_ids = set()
+        deduped = []
+        for g in groups_data:
+            wa_id = g.get("waId", "")
+            if wa_id and wa_id in seen_wa_ids:
+                continue
+            if wa_id:
+                seen_wa_ids.add(wa_id)
+            deduped.append(g)
         try:
             db = psycopg2.connect(os.environ["DATABASE_URL"])
             cur = db.cursor()
             cur.execute(f"DELETE FROM {SCHEMA}.groups WHERE user_id=%s AND instance_id=%s AND tag=%s", (user_id, inst, tag))
-            for g in groups_data:
+            for g in deduped:
                 cur.execute(
                     f"INSERT INTO {SCHEMA}.groups (user_id, instance_id, name, members, active, tag, wa_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                     (user_id, inst, g.get("name",""), g.get("members", 0), g.get("active", True), tag, g.get("waId",""))
