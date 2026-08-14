@@ -121,6 +121,30 @@ def handler(event: dict, context) -> dict:
         db.commit()
         return json_response({"ok": True})
 
+    if action == "register":
+        email = body.get("email", "").strip().lower()
+        password = body.get("password", "")
+        if not email or "@" not in email:
+            return json_response({"error": "Введите корректный email"}, 400)
+        if not password or len(password) < 6:
+            return json_response({"error": "Пароль должен быть не короче 6 символов"}, 400)
+        pw_hash = hash_password(password)
+        try:
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.users (email, password_hash) VALUES (%s, %s) RETURNING id",
+                (email, pw_hash)
+            )
+            user_id = cur.fetchone()[0]
+            sid = secrets.token_hex(32)
+            cur.execute(f"INSERT INTO {SCHEMA}.sessions (id, user_id) VALUES (%s, %s)", (sid, user_id))
+            db.commit()
+            return json_response({"session_id": sid, "user_id": user_id, "email": email, "has_instance": False})
+        except Exception as e:
+            db.rollback()
+            if "unique" in str(e).lower():
+                return json_response({"error": "Этот email уже зарегистрирован"}, 400)
+            return json_response({"error": str(e)}, 500)
+
     if action == "login":
         email = body.get("email", "").strip().lower()
         password = body.get("password", "")
