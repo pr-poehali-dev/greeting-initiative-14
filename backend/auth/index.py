@@ -28,7 +28,7 @@ def notify_admin_new_registration(email: str):
             print(f"[auth] telegram notify error: {e}")
 
     resend_key = os.environ.get("RESEND_API_KEY", "")
-    admin_email = "dzharimok.u@gmail.com"
+    admin_email = os.environ.get("ADMIN_NOTIFY_EMAIL", "").strip()
     if resend_key and admin_email:
         try:
             site_url = (os.environ.get("SITE_URL", "").strip() or "https://preview--greeting-initiative-14.poehali.dev").rstrip("/")
