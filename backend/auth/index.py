@@ -28,7 +28,7 @@ def notify_admin_new_registration(email: str):
             print(f"[auth] telegram notify error: {e}")
 
     resend_key = os.environ.get("RESEND_API_KEY", "")
-    admin_email = os.environ.get("ADMIN_NOTIFY_EMAIL", "")
+    admin_email = "dzharimok.u@gmail.com"
     if resend_key and admin_email:
         try:
             url = "https://api.resend.com/emails"
@@ -41,6 +41,7 @@ def notify_admin_new_registration(email: str):
             req = urllib.request.Request(url, data=payload, headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {resend_key}",
+                "User-Agent": "Mozilla/5.0 (compatible; poehali-backend/1.0)",
             })
             with urllib.request.urlopen(req, timeout=8) as resp:
                 print(f"[auth] email notify sent: {resp.read().decode()[:200]}")
