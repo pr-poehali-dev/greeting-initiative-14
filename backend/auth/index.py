@@ -1,11 +1,28 @@
 import os
 import json
 import hashlib
+import urllib.request
 
 import secrets
 import psycopg2
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p54486869_greeting_initiative_")
+
+
+def notify_admin_new_registration(email: str):
+    """Отправляет уведомление админу в Telegram о новой регистрации клиента."""
+    token = os.environ.get("ADMIN_TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("ADMIN_TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return
+    try:
+        text = f"🆕 Новая регистрация клиента\nEmail: {email}"
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = json.dumps({"chat_id": chat_id, "text": text}).encode()
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"[auth] telegram notify error: {e}")
 
 cors = {
     "Access-Control-Allow-Origin": "*",
@@ -138,6 +155,7 @@ def handler(event: dict, context) -> dict:
             sid = secrets.token_hex(32)
             cur.execute(f"INSERT INTO {SCHEMA}.sessions (id, user_id) VALUES (%s, %s)", (sid, user_id))
             db.commit()
+            notify_admin_new_registration(email)
             return json_response({"session_id": sid, "user_id": user_id, "email": email, "has_instance": False})
         except Exception as e:
             db.rollback()
