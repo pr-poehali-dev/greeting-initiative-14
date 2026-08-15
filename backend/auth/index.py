@@ -31,12 +31,15 @@ def notify_admin_new_registration(email: str):
     admin_email = "dzharimok.u@gmail.com"
     if resend_key and admin_email:
         try:
+            site_url = os.environ.get("SITE_URL", "").strip().rstrip("/")
+            admin_link = f"{site_url}/admin" if site_url else ""
+            link_html = f'<p><a href="{admin_link}">Открыть админ-панель</a></p>' if admin_link else ""
             url = "https://api.resend.com/emails"
             payload = json.dumps({
                 "from": "onboarding@resend.dev",
                 "to": [admin_email],
                 "subject": "Новая регистрация клиента",
-                "html": f"<p>Зарегистрирован новый клиент:</p><p><b>{email}</b></p><p>Не забудьте привязать WhatsApp-инстанс в админ-панели.</p>",
+                "html": f"<p>Зарегистрирован новый клиент:</p><p><b>{email}</b></p><p>Не забудьте привязать WhatsApp-инстанс в админ-панели.</p>{link_html}",
             }).encode()
             req = urllib.request.Request(url, data=payload, headers={
                 "Content-Type": "application/json",
