@@ -174,6 +174,17 @@ export default function Admin() {
           <div>Зайди на <span className="font-mono">green-api.com</span> → Мои инстансы → выбери инстанс → скопируй <b>IdInstance</b> и <b>ApiTokenInstance</b></div>
         </div>
 
+        {users.filter((u) => !(u.instance_id && u.instance_token)).length > 0 && (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+              <Icon name="UserPlus" size={16} className="text-amber-400" />
+            </div>
+            <div className="text-sm text-amber-300">
+              <span className="font-semibold">{users.filter((u) => !(u.instance_id && u.instance_token)).length}</span> клиент(ов) ждут настройки WhatsApp-инстанса
+            </div>
+          </div>
+        )}
+
         <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
           <div className="text-sm font-semibold text-foreground">Новый пользователь</div>
           <div className="space-y-3">
