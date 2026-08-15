@@ -2,6 +2,7 @@ import os
 import json
 import hashlib
 import urllib.request
+import urllib.error
 
 import secrets
 import psycopg2
@@ -20,7 +21,10 @@ def notify_admin_new_registration(email: str):
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = json.dumps({"chat_id": chat_id, "text": text}).encode()
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=5)
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            print(f"[auth] telegram notify sent: {resp.read().decode()[:200]}")
+    except urllib.error.HTTPError as e:
+        print(f"[auth] telegram notify HTTP {e.code}: {e.read().decode()[:200]}")
     except Exception as e:
         print(f"[auth] telegram notify error: {e}")
 
