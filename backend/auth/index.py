@@ -93,7 +93,7 @@ def handler(event: dict, context) -> dict:
         secret = body.get("secret", "")
         if secret != admin_secret:
             return json_response({"error": "Forbidden"}, 403)
-        cur.execute(f"SELECT id, email, green_api_instance_id, green_api_token, max_api_instance_id, max_api_token, telegram_bot_token, whapi_token FROM {SCHEMA}.users ORDER BY id")
+        cur.execute(f"SELECT id, email, green_api_instance_id, green_api_token, max_api_instance_id, max_api_token, telegram_bot_token, whapi_token FROM {SCHEMA}.users WHERE email NOT LIKE '%\\_\\_deleted%' ORDER BY id")
         rows = cur.fetchall()
         return json_response({"users": [{"id": r[0], "email": r[1], "instance_id": r[2] or "", "instance_token": r[3] or "", "max_instance_id": r[4] or "", "max_instance_token": r[5] or "", "telegram_bot_token": r[6] or "", "whapi_token": r[7] or ""} for r in rows]})
 
