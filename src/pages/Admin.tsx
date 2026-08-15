@@ -28,6 +28,23 @@ interface User {
   telegram_bot_token: string;
 }
 
+function CopyEmailButton({ email }: { email: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(email);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      title="Скопировать email"
+      className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all"
+    >
+      <Icon name={copied ? "Check" : "Copy"} size={13} className={copied ? "text-primary" : ""} />
+    </button>
+  );
+}
+
 export default function Admin() {
   const [adminSecret, setAdminSecret] = useState("");
   const [authed, setAuthed] = useState(false);
@@ -44,6 +61,7 @@ export default function Admin() {
   const [resetingId, setResetingId] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [newPasswords, setNewPasswords] = useState<Record<number, string>>({});
+  const [search, setSearch] = useState("");
   const [editInstances, setEditInstances] = useState<Record<number, {
     id: string; token: string;
     max_id: string; max_token: string;
@@ -219,17 +237,22 @@ export default function Admin() {
 
         <div className="bg-card border border-border rounded-2xl p-6 space-y-3">
           <div className="text-sm font-semibold text-foreground">Все пользователи ({users.length})</div>
+          <div className="relative">
+            <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input placeholder="Поиск по email" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-9 text-sm" />
+          </div>
           {users.length === 0 ? (
             <div className="text-xs text-muted-foreground py-2">Нет пользователей</div>
           ) : (
             <div className="space-y-3">
-              {users.map((u) => (
+              {users.filter((u) => u.email.toLowerCase().includes(search.trim().toLowerCase())).map((u) => (
                 <div key={u.id} className="rounded-lg bg-secondary/40 overflow-hidden">
                   <div className="flex items-center gap-3 px-3 py-2.5">
                     <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
                       <Icon name="User" size={13} className="text-primary" />
                     </div>
-                    <div className="text-sm text-foreground flex-1 font-medium">{u.email}</div>
+                    <div className="text-sm text-foreground flex-1 font-medium truncate">{u.email}</div>
+                    <CopyEmailButton email={u.email} />
                     <div className={`w-2 h-2 rounded-full flex-shrink-0 ${u.instance_id && u.instance_token ? "bg-primary" : "bg-amber-500"}`}
                       title={u.instance_id ? "Инстанс назначен" : "Инстанс не назначен"} />
                     <button onClick={() => deleteUser(u.id, u.email)} disabled={deletingId === u.id}
