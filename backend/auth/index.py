@@ -11,22 +11,43 @@ SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p54486869_greeting_initiative_")
 
 
 def notify_admin_new_registration(email: str):
-    """Отправляет уведомление админу в Telegram о новой регистрации клиента."""
+    """Отправляет уведомление админу (Telegram + email) о новой регистрации клиента."""
     token = os.environ.get("ADMIN_TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("ADMIN_TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
-        return
-    try:
-        text = f"🆕 Новая регистрация клиента\nEmail: {email}"
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = json.dumps({"chat_id": chat_id, "text": text}).encode()
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            print(f"[auth] telegram notify sent: {resp.read().decode()[:200]}")
-    except urllib.error.HTTPError as e:
-        print(f"[auth] telegram notify HTTP {e.code}: {e.read().decode()[:200]}")
-    except Exception as e:
-        print(f"[auth] telegram notify error: {e}")
+    if token and chat_id:
+        try:
+            text = f"🆕 Новая регистрация клиента\nEmail: {email}"
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            payload = json.dumps({"chat_id": chat_id, "text": text}).encode()
+            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                print(f"[auth] telegram notify sent: {resp.read().decode()[:200]}")
+        except urllib.error.HTTPError as e:
+            print(f"[auth] telegram notify HTTP {e.code}: {e.read().decode()[:200]}")
+        except Exception as e:
+            print(f"[auth] telegram notify error: {e}")
+
+    resend_key = os.environ.get("RESEND_API_KEY", "")
+    admin_email = os.environ.get("ADMIN_NOTIFY_EMAIL", "")
+    if resend_key and admin_email:
+        try:
+            url = "https://api.resend.com/emails"
+            payload = json.dumps({
+                "from": "onboarding@resend.dev",
+                "to": [admin_email],
+                "subject": "Новая регистрация клиента",
+                "html": f"<p>Зарегистрирован новый клиент:</p><p><b>{email}</b></p><p>Не забудьте привязать WhatsApp-инстанс в админ-панели.</p>",
+            }).encode()
+            req = urllib.request.Request(url, data=payload, headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {resend_key}",
+            })
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                print(f"[auth] email notify sent: {resp.read().decode()[:200]}")
+        except urllib.error.HTTPError as e:
+            print(f"[auth] email notify HTTP {e.code}: {e.read().decode()[:200]}")
+        except Exception as e:
+            print(f"[auth] email notify error: {e}")
 
 cors = {
     "Access-Control-Allow-Origin": "*",
