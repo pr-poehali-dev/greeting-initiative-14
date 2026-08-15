@@ -283,16 +283,15 @@ export default function Admin() {
                       className="font-mono text-xs h-8" />
 
                     <div className="text-xs font-medium text-muted-foreground pt-1">Telegram Bot</div>
-                    <div className="flex items-center gap-2">
-                      <Input placeholder="Токен бота (от @BotFather)"
-                        value={editInstances[u.id]?.tg_token || ""}
-                        onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], tg_token: e.target.value } }))}
-                        className="font-mono text-xs h-8" />
-                      <button onClick={() => saveInstance(u.id, u.email)} disabled={savingId === u.id}
-                        className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all disabled:opacity-40">
-                        <Icon name={savingId === u.id ? "Loader" : "Save"} size={13} className={savingId === u.id ? "animate-spin" : ""} />
-                      </button>
-                    </div>
+                    <Input placeholder="Токен бота (от @BotFather)"
+                      value={editInstances[u.id]?.tg_token || ""}
+                      onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], tg_token: e.target.value } }))}
+                      className="font-mono text-xs h-8" />
+
+                    <Button size="sm" className="w-full gap-2 mt-1" onClick={() => saveInstance(u.id, u.email)} disabled={savingId === u.id}>
+                      <Icon name={savingId === u.id ? "Loader" : "Save"} size={13} className={savingId === u.id ? "animate-spin" : ""} />
+                      {savingId === u.id ? "Сохраняю..." : "Сохранить настройки инстансов"}
+                    </Button>
                   </div>
 
                   <div className="px-3 pb-2.5">
