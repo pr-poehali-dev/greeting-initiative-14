@@ -41,19 +41,32 @@ def get_user_instance(session_id: str, platform: str = "whatsapp") -> tuple:
     return "", ""
 
 
-def get_all_accounts(session_id: str, platform: str) -> list:
-    """Возвращает все ПОДКЛЮЧЁННЫЕ доп. аккаунты пользователя из wa_accounts."""
+def get_all_accounts(session_id: str, platform: str, account_ids: list = None) -> list:
+    """Возвращает ПОДКЛЮЧЁННЫЕ доп. аккаунты пользователя из wa_accounts.
+    Если передан account_ids — только выбранные пользователем аккаунты."""
     if not session_id:
         return []
     try:
         db = psycopg2.connect(os.environ["DATABASE_URL"])
         cur = db.cursor()
-        cur.execute(f"""
-            SELECT a.instance_id, a.token
-            FROM {SCHEMA}.wa_accounts a
-            JOIN {SCHEMA}.sessions s ON s.user_id = a.user_id
-            WHERE s.id=%s AND s.expires_at > NOW() AND a.platform=%s AND a.status='connected'
-        """, (session_id, platform))
+        if account_ids is not None:
+            if not account_ids:
+                db.close()
+                return []
+            ids = tuple(int(i) for i in account_ids)
+            cur.execute(f"""
+                SELECT a.instance_id, a.token
+                FROM {SCHEMA}.wa_accounts a
+                JOIN {SCHEMA}.sessions s ON s.user_id = a.user_id
+                WHERE s.id=%s AND s.expires_at > NOW() AND a.platform=%s AND a.status='connected' AND a.id IN %s
+            """, (session_id, platform, ids))
+        else:
+            cur.execute(f"""
+                SELECT a.instance_id, a.token
+                FROM {SCHEMA}.wa_accounts a
+                JOIN {SCHEMA}.sessions s ON s.user_id = a.user_id
+                WHERE s.id=%s AND s.expires_at > NOW() AND a.platform=%s AND a.status='connected'
+            """, (session_id, platform))
         rows = cur.fetchall()
         db.close()
         return [(r[0], r[1]) for r in rows if r[0] and r[1]]
@@ -196,8 +209,12 @@ def handler(event: dict, context) -> dict:
     text = (body.get("text") or "").strip()
     group_ids = list(dict.fromkeys(body.get("group_ids", [])))  # дедуп с сохранением порядка
     image_url = (body.get("image_url") or "").strip()
-    # multi_account=true — отправить со всех аккаунтов
+    # multi_account=true — отправить с нескольких аккаунтов
     multi = body.get("multi_account", False)
+    # account_ids — конкретные id доп. аккаунтов (wa_accounts.id); если ключ вообще не передан — берём все подключённые
+    account_ids = body.get("account_ids") if "account_ids" in body else None
+    # use_main_account — включать ли основной (legacy) аккаунт пользователя в мультиотправку
+    use_main_account = body.get("use_main_account", True)
 
     if not text and not image_url:
         return {"statusCode": 400, "headers": {**cors, "Content-Type": "application/json"},
@@ -228,10 +245,11 @@ def handler(event: dict, context) -> dict:
 
     # ── Green API (multi-account) ──────────────────────────────────────────
     if multi:
-        accounts = get_all_accounts(session_id, platform)
-        main_instance, main_token = get_user_instance(session_id, platform)
-        if main_instance and main_token and (main_instance, main_token) not in accounts:
-            accounts = [(main_instance, main_token)] + accounts
+        accounts = get_all_accounts(session_id, platform, account_ids)
+        if use_main_account:
+            main_instance, main_token = get_user_instance(session_id, platform)
+            if main_instance and main_token and (main_instance, main_token) not in accounts:
+                accounts = [(main_instance, main_token)] + accounts
         if not accounts:
             return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                     "body": json.dumps({"error": "Нет подключённых аккаунтов"})}

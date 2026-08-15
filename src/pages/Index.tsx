@@ -129,6 +129,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [accountQrStatus, setAccountQrStatus] = useState<WaStatus>("disconnected");
   const accountPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const accountQrRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
+  const [includeMainAccount, setIncludeMainAccount] = useState(true);
 
   // Whapi state
   const [whapiStatus, setWhapiStatus] = useState<WaStatus>("disconnected");
@@ -161,10 +163,16 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const qrRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (tab === "connect" && (platform === "whatsapp" || platform === "max")) {
+    if ((tab === "connect" || tab === "broadcast") && (platform === "whatsapp" || platform === "max")) {
       fetchAccounts(platform);
     }
   }, [tab, platform]);
+
+  // По умолчанию выбираем все подключённые аккаунты (доп. + основной)
+  useEffect(() => {
+    setSelectedAccountIds(waAccounts.filter((a) => a.status === "connected").map((a) => a.id));
+    setIncludeMainAccount(true);
+  }, [waAccounts, platform]);
 
   // Загружаем группы из БД при старте
   async function loadGroups() {
@@ -587,7 +595,13 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
         const res = await fetch(`${SEND_URL}?platform=${platform}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
-          body: JSON.stringify({ text: broadcastText, group_ids: batch, multi_account: waAccounts.length > 0, image_url: broadcastImageUrl || undefined }),
+          body: JSON.stringify({
+            text: broadcastText, group_ids: batch,
+            multi_account: waAccounts.length > 0,
+            account_ids: selectedAccountIds,
+            use_main_account: includeMainAccount,
+            image_url: broadcastImageUrl || undefined,
+          }),
           signal: controller.signal,
         });
         clearTimeout(timeout);
@@ -649,6 +663,10 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     });
     setTgSelectedGroups([]);
     setTab("groups");
+  }
+
+  function toggleAccountSelection(id: number) {
+    setSelectedAccountIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   }
 
   function toggleWaGroup(id: string) {
@@ -1660,18 +1678,41 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 ))}
               </div>
 
-              {/* Баннер: рассылка со всех аккаунтов */}
-              {(platform === "whatsapp" || platform === "max") && waAccounts.length > 0 && (
-                <div className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-3 flex items-center gap-3">
-                  <Icon name="Layers" size={16} className="text-primary flex-shrink-0" />
-                  <span className="text-sm text-foreground">
-                    Рассылка пойдёт через все <span className="text-primary font-semibold">{waAccounts.length} аккаунта</span> одновременно — группы распределятся между ними автоматически
-                  </span>
-                  <button onClick={() => { setTab("connect"); }} className="ml-auto text-xs text-primary hover:underline flex-shrink-0">
-                    Управлять
-                  </button>
-                </div>
-              )}
+              {/* Выбор аккаунтов для рассылки */}
+              {(platform === "whatsapp" || platform === "max") && waAccounts.length > 0 && (() => {
+                const mainConnected = (platform === "max" ? maxStatus : waStatus) === "connected";
+                const totalSelected = (mainConnected && includeMainAccount ? 1 : 0) + selectedAccountIds.length;
+                return (
+                  <div className="rounded-xl border border-border bg-card overflow-hidden">
+                    <div className="px-5 py-3 border-b border-border flex items-center gap-3">
+                      <Icon name="Layers" size={16} className="text-primary flex-shrink-0" />
+                      <span className="text-sm text-foreground">
+                        Отправка с <span className="text-primary font-semibold">{totalSelected}</span> {totalSelected === 1 ? "аккаунта" : "аккаунтов"} — группы распределятся между выбранными
+                      </span>
+                      <button onClick={() => setTab("connect")} className="ml-auto text-xs text-primary hover:underline flex-shrink-0">
+                        Управлять
+                      </button>
+                    </div>
+                    <div className="divide-y divide-border/50">
+                      {mainConnected && (
+                        <label className="flex items-center gap-3 px-5 py-2.5 cursor-pointer hover:bg-secondary/40 transition-colors">
+                          <input type="checkbox" checked={includeMainAccount} onChange={() => setIncludeMainAccount((v) => !v)} className="w-4 h-4 accent-green-500" />
+                          <span className="text-sm text-foreground flex-1">Основной аккаунт</span>
+                          <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />
+                        </label>
+                      )}
+                      {waAccounts.map((acc) => (
+                        <label key={acc.id} className={`flex items-center gap-3 px-5 py-2.5 transition-colors ${acc.status === "connected" ? "cursor-pointer hover:bg-secondary/40" : "opacity-40 cursor-not-allowed"}`}>
+                          <input type="checkbox" checked={selectedAccountIds.includes(acc.id)} disabled={acc.status !== "connected"}
+                            onChange={() => toggleAccountSelection(acc.id)} className="w-4 h-4 accent-green-500" />
+                          <span className="text-sm text-foreground flex-1 truncate">{acc.name}</span>
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${acc.status === "connected" ? "bg-primary" : "bg-muted-foreground/40"}`} />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Предупреждение если не подключено */}
               {platform === "whatsapp" && waStatus !== "connected" && waAccounts.length === 0 && (
@@ -1754,8 +1795,13 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                     disabled={
                       (!broadcastText.trim() && !broadcastImageUrl) || sending || uploadingImage ||
                       (platform === "telegram" ? tgStatus !== "connected" || tgSelectedGroups.length === 0 :
-                       platform === "max" ? (maxStatus !== "connected" && waAccounts.length === 0) || selectedGroups.length === 0 :
-                       (waStatus !== "connected" && waAccounts.length === 0) || selectedGroups.length === 0)
+                       (() => {
+                         const mainConnected = (platform === "max" ? maxStatus : waStatus) === "connected";
+                         const hasAnyAccount = waAccounts.length > 0
+                           ? (mainConnected && includeMainAccount) || selectedAccountIds.length > 0
+                           : mainConnected;
+                         return !hasAnyAccount || selectedGroups.length === 0;
+                       })())
                     }
                     className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2 h-11 text-sm font-semibold disabled:opacity-40 whitespace-nowrap"
                   >
