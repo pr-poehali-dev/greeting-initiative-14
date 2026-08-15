@@ -31,7 +31,7 @@ def notify_admin_new_registration(email: str):
     admin_email = "dzharimok.u@gmail.com"
     if resend_key and admin_email:
         try:
-            site_url = os.environ.get("SITE_URL", "").strip().rstrip("/")
+            site_url = (os.environ.get("SITE_URL", "").strip() or "https://preview--greeting-initiative-14.poehali.dev").rstrip("/")
             admin_link = f"{site_url}/admin" if site_url else ""
             link_html = f'<p><a href="{admin_link}">Открыть админ-панель</a></p>' if admin_link else ""
             url = "https://api.resend.com/emails"
