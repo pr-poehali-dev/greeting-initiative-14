@@ -71,7 +71,7 @@ export default function Login({ onLogin }: LoginProps) {
             <Icon name="MessageCircle" size={20} className="text-white" />
           </div>
           <div>
-            <div className="text-lg font-bold text-foreground">WA Рассылки</div>
+            <div className="text-lg font-bold text-foreground">Рассылка Про</div>
             <div className="text-xs text-muted-foreground">Панель управления</div>
           </div>
         </div>

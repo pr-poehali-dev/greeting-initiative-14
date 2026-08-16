@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTheme } from "next-themes";
 import Icon from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +69,7 @@ const tagColors: Record<string, string> = {
 };
 
 const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
+  const { theme, setTheme } = useTheme();
   const [tab, setTab] = useState<Tab>("dashboard");
   const [platform, setPlatform] = useState<Platform>("whatsapp");
   const [botActive, setBotActive] = useState(false);
@@ -829,13 +831,13 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   return (
     <div className="min-h-screen bg-background flex" style={{ fontFamily: "'Golos Text', sans-serif" }}>
       {/* Sidebar */}
-      <aside className="w-60 min-h-screen flex flex-col border-r border-border" style={{ background: "hsl(220,18%,8%)" }}>
+      <aside className="w-60 min-h-screen flex flex-col border-r border-border bg-sidebar">
         <div className="px-6 py-5 border-b border-border flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
             <Icon name="MessageCircle" size={18} className="text-white" />
           </div>
           <div>
-            <div className="text-sm font-bold text-foreground leading-tight">WA Рассылки</div>
+            <div className="text-sm font-bold text-foreground leading-tight">Рассылка Про</div>
             <div className="text-xs text-muted-foreground">Панель управления</div>
           </div>
         </div>
@@ -873,6 +875,13 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
               <Icon name="User" size={12} className="text-primary" />
             </div>
             <div className="text-xs text-muted-foreground truncate flex-1">{userEmail}</div>
+            <button
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="p-1 rounded text-muted-foreground/60 hover:text-foreground transition-colors"
+              title={theme === "dark" ? "Светлая тема" : "Тёмная тема"}
+            >
+              <Icon name={theme === "dark" ? "Sun" : "Moon"} size={14} />
+            </button>
             {/* Скрытая кнопка администратора */}
             <button
               onClick={() => isAdmin ? setTab("users") : setShowAdminPrompt(true)}
