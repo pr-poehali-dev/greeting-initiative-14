@@ -1042,6 +1042,10 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                   {showAddAccount && (
                     <div className="border-t border-border px-5 py-4 bg-secondary/30 space-y-3 animate-fade-in">
                       <div className="text-sm font-semibold text-foreground">Новый аккаунт</div>
+                      <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                        <Icon name="AlertTriangle" size={13} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                        <span className="text-xs text-muted-foreground">На сайте сервиса просто скопируйте идентификатор и токен — сканировать там QR не нужно, вход в WhatsApp будет только здесь.</span>
+                      </div>
                       <Input
                         placeholder="Название (например: Основной)"
                         value={newAccName}
@@ -2178,8 +2182,8 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                       { n: 1, text: "Перейдите в раздел Подключение → выберите вкладку WhatsApp или MAX" },
                       { n: 2, text: "В блоке «Аккаунты» нажмите «+ Добавить»" },
                       { n: 3, text: "Введите название аккаунта (например: «Основной» или «Запасной»)" },
-                      { n: 4, text: "Введите идентификатор инстанса и токен доступа из личного кабинета сервиса" },
-                      { n: 5, text: "Нажмите «Добавить», затем «Подключить» — отсканируйте QR на телефоне" },
+                      { n: 4, text: "Введите идентификатор инстанса (IdInstance) и токен доступа (ApiTokenInstance) — их можно скопировать в личном кабинете сервиса, ничего сканировать там не нужно" },
+                      { n: 5, text: "Нажмите «Добавить», затем «Подключить» — QR-код появится прямо здесь, отсканируйте его один раз на телефоне" },
                       { n: 6, text: "Повторите для каждого дополнительного аккаунта" },
                     ].map((item) => (
                       <div key={item.n} className="flex items-start gap-3 text-sm text-muted-foreground">
@@ -2187,6 +2191,10 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                         {item.text}
                       </div>
                     ))}
+                  </div>
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <Icon name="AlertTriangle" size={14} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                    <span className="text-xs text-muted-foreground">Важно: на сайте сервиса-провайдера сканировать QR не нужно — там только скопируйте идентификатор и токен. Сам вход в WhatsApp/MAX происходит один раз, здесь в приложении.</span>
                   </div>
                   <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
                     <Icon name="Zap" size={14} className="text-blue-400 mt-0.5 flex-shrink-0" />
