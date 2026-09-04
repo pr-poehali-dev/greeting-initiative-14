@@ -1,4 +1,6 @@
 {
+  "worker_tick": "https://functions.poehali.dev/c633ec8d-0b52-4820-9417-7abb76d5b2ba",
+  "broadcast": "https://functions.poehali.dev/2f816048-5a7b-4a53-86cf-49e727300bef",
   "upload": "https://functions.poehali.dev/168495aa-6a87-499f-8375-61b74d3dcef3",
   "telegram": "https://functions.poehali.dev/97d4798c-1a93-44d3-9fdc-40acf141a66b",
   "greenapi": "https://functions.poehali.dev/2be7b0f6-d7f9-474a-b21e-d4a74f848153",

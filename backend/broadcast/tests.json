@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "Без сессии — no_session",
+      "method": "GET",
+      "path": "/?action=list_jobs",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "no_session"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

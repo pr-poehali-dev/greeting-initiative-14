@@ -12,6 +12,7 @@ const SEND_URL = "https://functions.poehali.dev/3c368aad-a7c2-4a91-9095-ac1a47fe
 const TELEGRAM_URL = "https://functions.poehali.dev/97d4798c-1a93-44d3-9fdc-40acf141a66b";
 const WHAPI_URL = "https://functions.poehali.dev/f6a3c6b6-03f7-4150-b586-7cf660c83ced";
 const UPLOAD_URL = "https://functions.poehali.dev/168495aa-6a87-499f-8375-61b74d3dcef3";
+const BROADCAST_URL = "https://functions.poehali.dev/2f816048-5a7b-4a53-86cf-49e727300bef";
 
 type Tab = "dashboard" | "groups" | "contacts" | "broadcast" | "connect" | "help" | "users";
 type WaStatus = "disconnected" | "loading" | "qr" | "connected";
@@ -79,6 +80,16 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const [sending, setSending] = useState(false);
   const [sendProgress, setSendProgress] = useState<{ done: number; total: number } | null>(null);
   const [sendResult, setSendResult] = useState<{ sent: number; failed: number; total: number } | null>(null);
+  const [activeJobId, setActiveJobId] = useState<number | null>(null);
+  const [jobStatus, setJobStatus] = useState<{
+    status: string; total_count: number; sent_count: number; failed_count: number;
+    ambiguous_count: number; error: string | null;
+  } | null>(null);
+  const [problemItems, setProblemItems] = useState<{
+    id: number; group_id: string; group_name: string; status: string;
+    attempts: number; last_error: string | null; last_error_type: string | null;
+  }[]>([]);
+  const jobPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [broadcastImagePreview, setBroadcastImagePreview] = useState<string | null>(null);
   const [broadcastImageUrl, setBroadcastImageUrl] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -196,6 +207,69 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   useEffect(() => {
     loadGroups();
   }, [sessionId]);
+
+  // Восстанавливаем незавершённое фоновое задание рассылки при заходе/перезаходе на страницу
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${BROADCAST_URL}?action=list_jobs`, { headers: apiHeaders });
+        const data = await res.json();
+        const active = (data.jobs || []).find((j: { status: string }) => j.status === "queued" || j.status === "running");
+        if (active) setActiveJobId(active.id);
+      } catch { /* ignore */ }
+    })();
+  }, [sessionId]);
+
+  // Опрашиваем статус активного фонового задания, пока оно не завершится
+  useEffect(() => {
+    if (!activeJobId) {
+      if (jobPollRef.current) clearInterval(jobPollRef.current);
+      return;
+    }
+    async function poll() {
+      try {
+        const res = await fetch(`${BROADCAST_URL}?action=job_status&job_id=${activeJobId}`, { headers: apiHeaders });
+        const data = await res.json();
+        if (data.job) {
+          setJobStatus(data.job);
+          setProblemItems(data.problem_items || []);
+          setSendProgress({ done: data.job.sent_count + data.job.failed_count + data.job.ambiguous_count, total: data.job.total_count });
+          if (data.job.status === "completed" || data.job.status === "cancelled") {
+            setSendResult({ sent: data.job.sent_count, failed: data.job.failed_count + data.job.ambiguous_count, total: data.job.total_count });
+            setSending(false);
+            setSendProgress(null);
+            setActiveJobId(null);
+            removeBroadcastImage();
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    poll();
+    jobPollRef.current = setInterval(poll, 3000);
+    return () => { if (jobPollRef.current) clearInterval(jobPollRef.current); };
+  }, [activeJobId]);
+
+  async function resolveAmbiguousItem(itemId: number, decision: "retry" | "mark_sent" | "mark_failed") {
+    try {
+      await fetch(`${BROADCAST_URL}?action=resolve_ambiguous`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+        body: JSON.stringify({ item_id: itemId, decision }),
+      });
+      setProblemItems((prev) => prev.filter((it) => it.id !== itemId));
+    } catch { /* ignore */ }
+  }
+
+  async function cancelActiveJob() {
+    if (!activeJobId) return;
+    try {
+      await fetch(`${BROADCAST_URL}?action=cancel_job`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+        body: JSON.stringify({ job_id: activeJobId }),
+      });
+    } catch { /* ignore */ }
+  }
 
   // Polling для WA/MAX QR
   useEffect(() => {
@@ -577,49 +651,78 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       return;
     }
 
-    const platformTag = platform === "max" ? "MAX" : platform === "whapi" ? "Whapi" : "WhatsApp";
+    if (platform === "whapi") {
+      const targetGroups = groups.filter((g) => selectedGroups.includes(g.id) && g.waId && g.tag === "Whapi");
+      if (targetGroups.length === 0) return;
+      setSending(true);
+      setSendResult(null);
+      setSendProgress({ done: 0, total: targetGroups.length });
+      const BATCH = 10;
+      const allIds = targetGroups.map((g) => g.waId!);
+      let totalSent = 0;
+      let totalFailed = 0;
+      for (let i = 0; i < allIds.length; i += BATCH) {
+        const batch = allIds.slice(i, i + BATCH);
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 120000);
+          const res = await fetch(`${SEND_URL}?platform=whapi`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+            body: JSON.stringify({ text: broadcastText, group_ids: batch, image_url: broadcastImageUrl || undefined }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          const data = await res.json();
+          totalSent += data.sent ?? 0;
+          totalFailed += data.failed ?? 0;
+        } catch {
+          totalFailed += batch.length;
+        }
+        setSendProgress({ done: Math.min(i + BATCH, allIds.length), total: allIds.length });
+      }
+      setSendResult({ sent: totalSent, failed: totalFailed, total: allIds.length });
+      setSendProgress(null);
+      setSending(false);
+      removeBroadcastImage();
+      return;
+    }
+
+    // WhatsApp / MAX — фоновая рассылка через очередь (переживает закрытие вкладки)
+    const platformTag = platform === "max" ? "MAX" : "WhatsApp";
     const targetGroups = groups.filter((g) => selectedGroups.includes(g.id) && g.waId && g.tag === platformTag);
     if (targetGroups.length === 0) return;
     setSending(true);
     setSendResult(null);
+    setProblemItems([]);
     setSendProgress({ done: 0, total: targetGroups.length });
-
-    const BATCH = 10;
-    const allIds = targetGroups.map((g) => g.waId!);
-    let totalSent = 0;
-    let totalFailed = 0;
-
-    for (let i = 0; i < allIds.length; i += BATCH) {
-      const batch = allIds.slice(i, i + BATCH);
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 120000);
-        const res = await fetch(`${SEND_URL}?platform=${platform}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
-          body: JSON.stringify({
-            text: broadcastText, group_ids: batch,
-            multi_account: waAccounts.length > 0,
-            account_ids: selectedAccountIds,
-            use_main_account: includeMainAccount,
-            image_url: broadcastImageUrl || undefined,
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        const data = await res.json();
-        totalSent += data.sent ?? 0;
-        totalFailed += data.failed ?? 0;
-      } catch {
-        totalFailed += batch.length;
+    try {
+      const res = await fetch(`${BROADCAST_URL}?action=create_job`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+        body: JSON.stringify({
+          platform,
+          text: broadcastText,
+          image_url: broadcastImageUrl || undefined,
+          groups: targetGroups.map((g) => ({ group_id: g.waId, group_name: g.name })),
+          multi_account: waAccounts.length > 0,
+          account_ids: selectedAccountIds,
+          use_main_account: includeMainAccount,
+        }),
+      });
+      const data = await res.json();
+      if (data.job_id) {
+        setActiveJobId(data.job_id);
+      } else {
+        setSending(false);
+        setSendProgress(null);
+        setSendResult({ sent: 0, failed: targetGroups.length, total: targetGroups.length });
       }
-      setSendProgress({ done: Math.min(i + BATCH, allIds.length), total: allIds.length });
+    } catch {
+      setSending(false);
+      setSendProgress(null);
+      setSendResult({ sent: 0, failed: targetGroups.length, total: targetGroups.length });
     }
-
-    setSendResult({ sent: totalSent, failed: totalFailed, total: allIds.length });
-    setSendProgress(null);
-    setSending(false);
-    removeBroadcastImage();
   }
 
   function importSelectedGroups(plat: Platform = "whatsapp") {
@@ -1824,13 +1927,22 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                   {sendProgress && (
                     <div className="space-y-1.5 min-w-[140px]">
                       <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>Прогресс</span>
+                        <span>{activeJobId ? "Рассылается в фоне" : "Прогресс"}</span>
                         <span>{sendProgress.done} / {sendProgress.total}</span>
                       </div>
                       <div className="h-2 rounded-full bg-secondary overflow-hidden">
                         <div className="h-full bg-primary rounded-full transition-all duration-500"
                           style={{ width: `${Math.round((sendProgress.done / sendProgress.total) * 100)}%` }} />
                       </div>
+                      {activeJobId && (
+                        <>
+                          <div className="text-[11px] text-muted-foreground">Можно закрыть вкладку — рассылка продолжится</div>
+                          <button onClick={cancelActiveJob} className="text-xs text-destructive hover:underline">Остановить</button>
+                        </>
+                      )}
+                      {jobStatus?.error && (
+                        <div className="text-[11px] text-destructive">{jobStatus.error}</div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1857,6 +1969,40 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                   <button onClick={() => setSendResult(null)} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors">
                     <Icon name="X" size={14} />
                   </button>
+                </div>
+              )}
+
+              {/* Группы, результат которых не подтверждён (ambiguous) или отправка не удалась */}
+              {problemItems.length > 0 && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-3">
+                  <div className="text-sm font-semibold text-amber-300 flex items-center gap-2">
+                    <Icon name="AlertTriangle" size={16} />
+                    Требуют внимания ({problemItems.length})
+                  </div>
+                  <div className="space-y-2">
+                    {problemItems.map((it) => (
+                      <div key={it.id} className="rounded-lg bg-secondary/40 p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm text-foreground font-medium truncate">{it.group_name || it.group_id}</span>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 ${it.status === "ambiguous" ? "bg-amber-500/20 text-amber-300" : "bg-red-500/20 text-red-400"}`}>
+                            {it.status === "ambiguous" ? "Не подтверждено" : "Ошибка"}
+                          </span>
+                        </div>
+                        {it.last_error && <div className="text-xs text-muted-foreground">{it.last_error}</div>}
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => resolveAmbiguousItem(it.id, "retry")}>
+                            <Icon name="RefreshCw" size={11} />Повторить
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-primary/30 text-primary" onClick={() => resolveAmbiguousItem(it.id, "mark_sent")}>
+                            <Icon name="Check" size={11} />Уже доставлено
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={() => resolveAmbiguousItem(it.id, "mark_failed")}>
+                            Не отправлять
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

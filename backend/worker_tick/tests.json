@@ -1,0 +1,13 @@
+{
+  "tests": [
+    {
+      "name": "Без секрета — Forbidden",
+      "method": "POST",
+      "path": "/",
+      "body": {},
+      "expectedStatus": 403,
+      "expectedBody": {"error": "Forbidden"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
