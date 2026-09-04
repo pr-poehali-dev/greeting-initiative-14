@@ -74,7 +74,14 @@ def resolve_accounts(cur, user_id: int, platform: str, multi: bool, account_ids,
 
 def nudge_worker():
     """Backend→backend: просим worker_tick немедленно обработать очередь, чтобы не ждать внешний таймер.
-    Секрет WORKER_SECRET остаётся только здесь, на сервере, и никогда не отдаётся в браузер."""
+    Секрет WORKER_SECRET остаётся только здесь, на сервере, и никогда не отдаётся в браузер.
+
+    КРИТИЧНО: worker_tick — долгий обработчик (может честно работать до ~25с, обрабатывая
+    очередь), а у этой функции (broadcast) собственный таймаут всего 5с. Поэтому здесь нельзя
+    ждать полного ответа worker_tick — используется маленький таймаут (2с), которого хватает
+    только на установление соединения и отправку запроса. Если worker_tick не успеет ответить
+    за это время — не страшно: задание уже сохранено в БД и будет надёжно подобрано в течение
+    минуты обычным тиком по cron. Этот вызов — только ускорение старта, а не гарантия."""
     if not WORKER_TICK_URL:
         return
     try:
@@ -82,9 +89,9 @@ def nudge_worker():
             WORKER_TICK_URL, data=b"{}", method="POST",
             headers={"Content-Type": "application/json", "X-Worker-Secret": os.environ.get("WORKER_SECRET", "")}
         )
-        urllib.request.urlopen(req, timeout=8)
+        urllib.request.urlopen(req, timeout=2)
     except Exception as e:
-        print(f"[broadcast] nudge_worker error (не критично): {e}")
+        print(f"[broadcast] nudge_worker error (не критично, обработается по cron): {e}")
 
 
 def handler(event: dict, context) -> dict:
