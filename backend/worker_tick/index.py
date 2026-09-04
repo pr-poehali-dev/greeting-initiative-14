@@ -9,14 +9,22 @@ import psycopg2
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p54486869_greeting_initiative_")
 BASE_URL = "https://api.green-api.com"
 
-# Сколько секунд worker может безопасно работать за один вызов, оставляя запас
-# до таймаута облачной функции. Таймаут функции worker_tick установлен в настройках
-# платформы (Ядро → Функции → worker_tick) на 2 минуты (120 секунд) — оставляем
-# запас ~15 секунд на завершение текущей отправки и запись в БД.
-TIME_BUDGET_SECONDS = float(os.environ.get("WORKER_TIME_BUDGET_SECONDS", "105"))
+# Таймаут функции worker_tick установлен в настройках платформы (Ядро → Функции →
+# worker_tick) на 2 минуты (120 секунд). Worker должен ПЕРЕСТАТЬ БРАТЬ НОВЫЕ элементы
+# заранее, с запасом на худший случай одного элемента: send_file (таймаут 20с) +
+# возможная доп. проверка verify_via_last_outgoing при ambiguous (таймаут 15с) +
+# накладные расходы на БД (~3-5с) ≈ 40 секунд запаса. Поэтому бюджет = 120 - 40 = 80с.
+TIME_BUDGET_SECONDS = float(os.environ.get("WORKER_TIME_BUDGET_SECONDS", "80"))
+
+# Дополнительный жёсткий предохранитель — не больше стольки элементов за один тик,
+# даже если тайм-бюджет ещё не исчерпан (защита от неожиданно быстрых ответов Green API).
+MAX_ITEMS_PER_TICK = int(os.environ.get("WORKER_MAX_ITEMS_PER_TICK", "30"))
 
 STUCK_SENDING_SECONDS = 90     # после скольки секунд считаем 'sending' зависшим (упал предыдущий worker)
-LOCK_STALE_SECONDS = 120       # после скольки секунд лок инстанса считается протухшим
+# Лок инстанса считается протухшим через 150с — с запасом ~30с сверх жёсткого таймаута
+# функции (120с), чтобы исключить гонку на границе: если платформа убьёт процесс
+# ровно на 120-й секунде, лок не должен "протухнуть" в тот же момент для другого worker'а.
+LOCK_STALE_SECONDS = 150
 BACKOFF_SECONDS = {1: 10, 2: 30, 3: 90}  # пауза перед повторной попыткой после временной ошибки
 
 cors = {
@@ -147,16 +155,39 @@ def journal_attempt(cur, item_id: int, attempt_no: int, http_status, error_type,
 
 def reap_stuck_items(cur, db):
     """Находит зависшие 'sending' (worker упал во время обработки), пытается подтвердить
-    результат через Green API. Если подтвердить нельзя — переводит в ambiguous без ретрая."""
+    результат через Green API. Если подтвердить нельзя — переводит в ambiguous без ретрая.
+
+    Защита от двух worker'ов, разбирающих один и тот же зависший item одновременно:
+    строки сначала атомарно "захватываются" (FOR UPDATE SKIP LOCKED + немедленное
+    продление locked_at), и только затем — вне короткой транзакции — идёт медленный
+    сетевой запрос к Green API для проверки. Если этот worker сам упадёт во время
+    проверки — item просто станет зависшим заново и будет разобран следующим тиком."""
     cur.execute(f"""
-        SELECT bji.id, bji.job_id, bji.group_id, bji.instance_id, bji.attempts, bji.max_attempts,
-               bj.user_id, bj.platform, bj.text
-        FROM {SCHEMA}.broadcast_job_items bji
-        JOIN {SCHEMA}.broadcast_jobs bj ON bj.id = bji.job_id
-        WHERE bji.status = 'sending' AND bji.locked_at < NOW() - INTERVAL '{STUCK_SENDING_SECONDS} seconds'
-        LIMIT 20
+        WITH stuck_candidates AS (
+            SELECT bji.id FROM {SCHEMA}.broadcast_job_items bji
+            JOIN {SCHEMA}.broadcast_jobs bj ON bj.id = bji.job_id
+            WHERE bji.status = 'sending' AND bji.locked_at < NOW() - INTERVAL '{STUCK_SENDING_SECONDS} seconds'
+            ORDER BY bji.id
+            LIMIT 20
+            FOR UPDATE OF bji SKIP LOCKED
+        )
+        UPDATE {SCHEMA}.broadcast_job_items
+        SET locked_at = NOW()
+        FROM stuck_candidates
+        WHERE broadcast_job_items.id = stuck_candidates.id
+        RETURNING broadcast_job_items.id, broadcast_job_items.job_id, broadcast_job_items.group_id,
+                  broadcast_job_items.instance_id, broadcast_job_items.attempts, broadcast_job_items.max_attempts
     """)
-    stuck = cur.fetchall()
+    claimed_stuck = cur.fetchall()
+    db.commit()
+
+    stuck = []
+    for item_id, job_id, group_id, instance_id, attempts, max_attempts in claimed_stuck:
+        cur.execute(f"SELECT user_id, platform, text FROM {SCHEMA}.broadcast_jobs WHERE id=%s", (job_id,))
+        jrow = cur.fetchone()
+        if jrow:
+            stuck.append((item_id, job_id, group_id, instance_id, attempts, max_attempts, jrow[0], jrow[1], jrow[2]))
+
     for item_id, job_id, group_id, instance_id, attempts, max_attempts, user_id, platform, text in stuck:
         token = get_token_for_instance(cur, user_id, platform, instance_id)
         confirmed = verify_via_last_outgoing(instance_id, token, group_id, text or "") if token else None
@@ -279,12 +310,12 @@ def handler(event: dict, context) -> dict:
     touched_jobs = set()
 
     for instance_id, platform in instance_platform_pairs:
-        if time.time() - start > TIME_BUDGET_SECONDS:
+        if time.time() - start > TIME_BUDGET_SECONDS or processed >= MAX_ITEMS_PER_TICK:
             break
         if not acquire_instance_lock(cur, db, platform, instance_id):
             continue  # занят другим worker'ом прямо сейчас
         try:
-            while time.time() - start < TIME_BUDGET_SECONDS:
+            while time.time() - start < TIME_BUDGET_SECONDS and processed < MAX_ITEMS_PER_TICK:
                 claimed = claim_next_item(cur, db, platform, instance_id, run_id)
                 if not claimed:
                     break
