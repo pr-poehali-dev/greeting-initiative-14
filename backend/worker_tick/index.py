@@ -10,11 +10,10 @@ SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p54486869_greeting_initiative_")
 BASE_URL = "https://api.green-api.com"
 
 # Сколько секунд worker может безопасно работать за один вызов, оставляя запас
-# до таймаута облачной функции. Если вы увеличите таймаут функции в настройках
-# платформы (Ядро → Функции → worker_tick), можно добавить секрет
-# WORKER_TIME_BUDGET_SECONDS с большим значением — тогда за один тик будет
-# обрабатываться больше элементов очереди.
-TIME_BUDGET_SECONDS = float(os.environ.get("WORKER_TIME_BUDGET_SECONDS", "4"))
+# до таймаута облачной функции. Таймаут функции worker_tick установлен в настройках
+# платформы (Ядро → Функции → worker_tick) на 2 минуты (120 секунд) — оставляем
+# запас ~15 секунд на завершение текущей отправки и запись в БД.
+TIME_BUDGET_SECONDS = float(os.environ.get("WORKER_TIME_BUDGET_SECONDS", "105"))
 
 STUCK_SENDING_SECONDS = 90     # после скольки секунд считаем 'sending' зависшим (упал предыдущий worker)
 LOCK_STALE_SECONDS = 120       # после скольки секунд лок инстанса считается протухшим
