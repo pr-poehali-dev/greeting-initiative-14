@@ -86,9 +86,22 @@ export default function Admin() {
     setAuthed(true); setLoadingUsers(false);
   }
 
+  function getDuplicateEmails(userId: number, value: string, key: "id" | "max_id"): string[] {
+    const v = value.trim();
+    if (!v) return [];
+    return users
+      .filter((u) => u.id !== userId && (editInstances[u.id]?.[key] || "").trim() === v)
+      .map((u) => u.email);
+  }
+
   async function saveInstance(userId: number, email: string) {
+    const { id, max_id } = editInstances[userId] || { id: "", max_id: "" };
+    const dupWa = getDuplicateEmails(userId, id, "id");
+    const dupMax = getDuplicateEmails(userId, max_id, "max_id");
+    if (dupWa.length > 0 && !confirm(`ID инстанса WhatsApp «${id}» уже используется у: ${dupWa.join(", ")}. Один WhatsApp-номер нельзя подключить к двум клиентам одновременно — они будут видеть чужие группы и мешать друг другу. Всё равно сохранить?`)) return;
+    if (dupMax.length > 0 && !confirm(`ID инстанса MAX «${max_id}» уже используется у: ${dupMax.join(", ")}. Продолжить?`)) return;
     setSavingId(userId);
-    const { id, token, max_id, max_token, tg_token } = editInstances[userId] || { id: "", token: "", max_id: "", max_token: "", tg_token: "" };
+    const { token, max_token, tg_token } = editInstances[userId] || { id: "", token: "", max_id: "", max_token: "", tg_token: "" };
     const res = await fetch(`${AUTH_URL}?action=set_instance`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, instance_id: id, instance_token: token, max_instance_id: max_id, max_instance_token: max_token, telegram_bot_token: tg_token, secret: adminSecret }),
@@ -267,6 +280,12 @@ export default function Admin() {
                       value={editInstances[u.id]?.id || ""}
                       onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], id: e.target.value } }))}
                       className="font-mono text-xs h-8" />
+                    {getDuplicateEmails(u.id, editInstances[u.id]?.id || "", "id").length > 0 && (
+                      <div className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1.5 flex items-start gap-1.5">
+                        <Icon name="AlertTriangle" size={12} className="mt-0.5 flex-shrink-0" />
+                        Уже используется у: {getDuplicateEmails(u.id, editInstances[u.id]?.id || "", "id").join(", ")}
+                      </div>
+                    )}
                     <Input placeholder="Токен инстанса WhatsApp"
                       value={editInstances[u.id]?.token || ""}
                       onChange={(e) => setEditInstances((prev) => ({ ...prev, [u.id]: { ...prev[u.id], token: e.target.value } }))}
