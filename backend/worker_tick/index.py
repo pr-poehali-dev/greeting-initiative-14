@@ -12,20 +12,34 @@ BASE_URL = "https://api.green-api.com"
 # Функция вызывается внешним cron-сервисом (cron-job.org), у которого на бесплатном
 # тарифе ЖЁСТКИЙ лимит HTTP-ответа 30 секунд (соединение обрывается клиентом, сколько бы
 # ни было настроено в таймауте платформы). Таймаут самой функции в настройках платформы
-# (Ядро → Функции → worker_tick) оставлен 120с как защитный запас, но воркер должен
-# САМ переставать брать новые элементы намного раньше 30с, чтобы обычный тик укладывался
-# в лимит cron-сервиса с хорошим запасом (запас нужен на редкий медленный ответ Green API
-# по последнему взятому элементу — до 20-35с в худшем случае — и накладные расходы БД).
-# Если единичный элемент всё же не уложится (редкая сетевая аномалия) и cron оборвёт
-# соединение — это не страшно: элемент останется в статусе 'sending' и будет надёжно
-# подобран и проверен функцией reap_stuck_items на одном из следующих тиков.
-TIME_BUDGET_SECONDS = float(os.environ.get("WORKER_TIME_BUDGET_SECONDS", "20"))
+# (Ядро → Функции → worker_tick) оставлен 120с как защитный запас на случай сбоев.
+#
+# КРИТИЧНО: проверка "осталось ли время" должна учитывать не только уже прошедшее время,
+# но и ХУДШИЙ СЛУЧАЙ длительности ОДНОГО ещё не начатого item — иначе item, взятый прямо
+# перед истечением бюджета, может сам растянуться (зависший/медленный ответ Green API +
+# доп. проверка verify_via_last_outgoing при ambiguous-ошибке) и увести общее время
+# далеко за 30-секундный предел cron-сервиса. Поэтому новый item берётся только если
+# HARD_DEADLINE_SECONDS - прошедшее_время >= WORST_CASE_ITEM_SECONDS (см. ниже).
+HARD_DEADLINE_SECONDS = float(os.environ.get("WORKER_HARD_DEADLINE_SECONDS", "25"))
+
+# Таймауты сетевых вызовов к Green API — намеренно небольшие (обычный ответ занимает
+# доли секунды - 1-2с), чтобы даже полностью зависший запрос не съедал весь бюджет.
+SEND_MESSAGE_TIMEOUT_SECONDS = 6
+SEND_FILE_TIMEOUT_SECONDS = 8
+API_GET_TIMEOUT_SECONDS = 6  # используется и в verify_via_last_outgoing
+
+# Худший случай одного item: самый долгий из вызовов отправки (текст/файл) + возможная
+# доп. проверка verify_via_last_outgoing при ambiguous-ошибке + запас на работу с БД (~1с).
+WORST_CASE_ITEM_SECONDS = max(SEND_MESSAGE_TIMEOUT_SECONDS, SEND_FILE_TIMEOUT_SECONDS) + API_GET_TIMEOUT_SECONDS + 1
 
 # Дополнительный жёсткий предохранитель — не больше стольки элементов за один тик,
 # даже если тайм-бюджет ещё не исчерпан (защита от неожиданно быстрых ответов Green API).
 MAX_ITEMS_PER_TICK = int(os.environ.get("WORKER_MAX_ITEMS_PER_TICK", "15"))
 
-STUCK_SENDING_SECONDS = 90     # после скольки секунд считаем 'sending' зависшим (упал предыдущий worker)
+# После скольки секунд считаем 'sending' зависшим (упал/оборвался предыдущий worker).
+# С запасом ~3x над WORST_CASE_ITEM_SECONDS, чтобы не путать "ещё реально обрабатывается"
+# с "точно зависло", но при этом восстанавливаться быстрее, чем раньше.
+STUCK_SENDING_SECONDS = 45
 # Лок инстанса считается протухшим через 150с — с запасом ~30с сверх жёсткого таймаута
 # функции (120с), чтобы исключить гонку на границе: если платформа убьёт процесс
 # ровно на 120-й секунде, лок не должен "протухнуть" в тот же момент для другого worker'а.
@@ -48,7 +62,7 @@ def json_response(data: dict, status: int = 200) -> dict:
 def api_get(instance_id: str, token: str, method: str, query: str = "") -> tuple:
     url = f"{BASE_URL}/waInstance{instance_id}/{method}/{token}{query}"
     req = urllib.request.Request(url, method="GET", headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=API_GET_TIMEOUT_SECONDS) as resp:
         return True, json.loads(resp.read().decode())
 
 
@@ -56,7 +70,7 @@ def send_message(instance_id: str, token: str, group_id: str, text: str):
     url = f"{BASE_URL}/waInstance{instance_id}/sendMessage/{token}"
     payload = json.dumps({"chatId": group_id, "message": text}).encode()
     req = urllib.request.Request(url, data=payload, method="POST", headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=SEND_MESSAGE_TIMEOUT_SECONDS) as resp:
         return json.loads(resp.read().decode())
 
 
@@ -65,7 +79,7 @@ def send_file(instance_id: str, token: str, group_id: str, text: str, file_url: 
     file_name = file_url.rsplit("/", 1)[-1] or "photo.jpg"
     payload = json.dumps({"chatId": group_id, "urlFile": file_url, "fileName": file_name, "caption": text}).encode()
     req = urllib.request.Request(url, data=payload, method="POST", headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with urllib.request.urlopen(req, timeout=SEND_FILE_TIMEOUT_SECONDS) as resp:
         return json.loads(resp.read().decode())
 
 
@@ -158,7 +172,14 @@ def journal_attempt(cur, item_id: int, attempt_no: int, http_status, error_type,
     """, (item_id, attempt_no, http_status, error_type, error_text))
 
 
-def reap_stuck_items(cur, db):
+# Не больше стольки зависших items разбираем за один тик — каждый требует сетевого
+# запроса к Green API (verify_via_last_outgoing), поэтому разбор ограничен и по времени
+# (time_left), и по количеству, чтобы не съесть весь 30-секундный бюджет cron-сервиса
+# ещё до того, как воркер начнёт слать новые сообщения.
+MAX_REAP_PER_TICK = 5
+
+
+def reap_stuck_items(cur, db, time_left):
     """Находит зависшие 'sending' (worker упал во время обработки), пытается подтвердить
     результат через Green API. Если подтвердить нельзя — переводит в ambiguous без ретрая.
 
@@ -166,14 +187,17 @@ def reap_stuck_items(cur, db):
     строки сначала атомарно "захватываются" (FOR UPDATE SKIP LOCKED + немедленное
     продление locked_at), и только затем — вне короткой транзакции — идёт медленный
     сетевой запрос к Green API для проверки. Если этот worker сам упадёт во время
-    проверки — item просто станет зависшим заново и будет разобран следующим тиком."""
+    проверки — item просто станет зависшим заново и будет разобран следующим тиком.
+
+    Ограничена по времени (time_left) и количеству (MAX_REAP_PER_TICK), чтобы не съесть
+    весь бюджет тика на восстановление и оставить время для отправки новых сообщений."""
     cur.execute(f"""
         WITH stuck_candidates AS (
             SELECT bji.id FROM {SCHEMA}.broadcast_job_items bji
             JOIN {SCHEMA}.broadcast_jobs bj ON bj.id = bji.job_id
             WHERE bji.status = 'sending' AND bji.locked_at < NOW() - INTERVAL '{STUCK_SENDING_SECONDS} seconds'
             ORDER BY bji.id
-            LIMIT 20
+            LIMIT {MAX_REAP_PER_TICK}
             FOR UPDATE OF bji SKIP LOCKED
         )
         UPDATE {SCHEMA}.broadcast_job_items
@@ -194,6 +218,8 @@ def reap_stuck_items(cur, db):
             stuck.append((item_id, job_id, group_id, instance_id, attempts, max_attempts, jrow[0], jrow[1], jrow[2]))
 
     for item_id, job_id, group_id, instance_id, attempts, max_attempts, user_id, platform, text in stuck:
+        if time_left() < API_GET_TIMEOUT_SECONDS + 1:
+            break  # не начинаем новую сетевую проверку без запаса времени на неё
         token = get_token_for_instance(cur, user_id, platform, instance_id)
         confirmed = verify_via_last_outgoing(instance_id, token, group_id, text or "") if token else None
         if confirmed is True:
@@ -293,10 +319,13 @@ def handler(event: dict, context) -> dict:
     start = time.time()
     run_id = getattr(context, "request_id", None) or uuid.uuid4().hex
 
+    def time_left() -> float:
+        return HARD_DEADLINE_SECONDS - (time.time() - start)
+
     db = psycopg2.connect(os.environ["DATABASE_URL"])
     cur = db.cursor()
 
-    reap_stuck_items(cur, db)
+    reap_stuck_items(cur, db, time_left)
     skip_cancelled_pending(cur, db)
     cur.execute(f"UPDATE {SCHEMA}.broadcast_jobs SET status='running', started_at=NOW(), updated_at=NOW() WHERE status='queued'")
     db.commit()
@@ -315,12 +344,14 @@ def handler(event: dict, context) -> dict:
     touched_jobs = set()
 
     for instance_id, platform in instance_platform_pairs:
-        if time.time() - start > TIME_BUDGET_SECONDS or processed >= MAX_ITEMS_PER_TICK:
+        # Новую пару instance/platform начинаем обрабатывать, только если оставшегося
+        # времени точно хватит на худший случай хотя бы одного item.
+        if time_left() < WORST_CASE_ITEM_SECONDS or processed >= MAX_ITEMS_PER_TICK:
             break
         if not acquire_instance_lock(cur, db, platform, instance_id):
             continue  # занят другим worker'ом прямо сейчас
         try:
-            while time.time() - start < TIME_BUDGET_SECONDS and processed < MAX_ITEMS_PER_TICK:
+            while time_left() >= WORST_CASE_ITEM_SECONDS and processed < MAX_ITEMS_PER_TICK:
                 claimed = claim_next_item(cur, db, platform, instance_id, run_id)
                 if not claimed:
                     break
@@ -384,9 +415,10 @@ def handler(event: dict, context) -> dict:
                 db.commit()
                 processed += 1
 
-                remaining = TIME_BUDGET_SECONDS - (time.time() - start)
                 pause = float(interval_seconds or 2.5)
-                if remaining <= pause:
+                # Прежде чем ждать паузу между сообщениями и брать следующий item,
+                # убеждаемся, что после паузы всё ещё останется время на его худший случай.
+                if time_left() <= pause + WORST_CASE_ITEM_SECONDS:
                     break
                 time.sleep(pause)
         finally:
