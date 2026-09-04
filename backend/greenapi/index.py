@@ -326,7 +326,7 @@ def handler(event: dict, context) -> dict:
         except Exception as e:
             return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                     "body": json.dumps({"groups": [], "error": str(e)})}
-        ok, data = api_post(instance_id, token, "getChats", {})
+        ok, data = api_get(instance_id, token, "getChats")
         if not ok or not isinstance(data, list):
             return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                     "body": json.dumps({"groups": [], "error": str(data)})}
@@ -501,7 +501,7 @@ def handler(event: dict, context) -> dict:
                 "body": json.dumps({"ok": ok})}
 
     if action == "groups":
-        ok, data = api_post(instance_id, token, "getChats", {})
+        ok, data = api_get(instance_id, token, "getChats")
         if not ok or not isinstance(data, list):
             return {"statusCode": 200, "headers": {**cors, "Content-Type": "application/json"},
                     "body": json.dumps({"groups": [], "total": 0, "error": str(data)})}
