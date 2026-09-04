@@ -56,18 +56,34 @@ const mockContacts = [
   { id: 5, name: "Иван Морозов", phone: "+7 926 333-99-00", group: "VIP покупатели", status: "active" },
 ];
 
-const mockHistory = [
-  { id: 1, title: "Акция на ноябрь", groups: 3, sent: 87, read: 54, date: "05.06.2026", status: "done" },
-  { id: 2, title: "Обновление прайса", groups: 2, sent: 21, read: 17, date: "03.06.2026", status: "done" },
-  { id: 3, title: "Приглашение на выставку", groups: 5, sent: 127, read: 0, date: "06.06.2026", status: "pending" },
-];
-
 const tagColors: Record<string, string> = {
   VIP: "bg-amber-500/15 text-amber-400 border-amber-500/30",
   Клиенты: "bg-blue-500/15 text-blue-400 border-blue-500/30",
   Партнёры: "bg-violet-500/15 text-violet-400 border-violet-500/30",
   WhatsApp: "bg-primary/15 text-primary border-primary/30",
 };
+
+const jobStatusLabels: Record<string, { label: string; cls: string }> = {
+  queued: { label: "В очереди", cls: "bg-blue-500/10 text-blue-400 border-blue-500/30" },
+  running: { label: "Отправляется", cls: "bg-amber-500/10 text-amber-400 border-amber-500/30" },
+  completed: { label: "Отправлено", cls: "bg-primary/10 text-primary border-primary/30" },
+  cancelled: { label: "Остановлено", cls: "bg-muted text-muted-foreground border-border" },
+};
+
+const itemStatusLabels: Record<string, { label: string; cls: string }> = {
+  pending: { label: "В очереди", cls: "bg-blue-500/15 text-blue-400" },
+  sending: { label: "Отправляется", cls: "bg-amber-500/15 text-amber-400" },
+  sent: { label: "Отправлено", cls: "bg-primary/15 text-primary" },
+  failed: { label: "Ошибка", cls: "bg-red-500/15 text-red-400" },
+  ambiguous: { label: "Не подтверждено", cls: "bg-amber-500/15 text-amber-400" },
+  skipped: { label: "Пропущено", cls: "bg-muted text-muted-foreground" },
+};
+
+function formatJobDate(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
   const { theme, setTheme } = useTheme();
@@ -90,6 +106,22 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     attempts: number; last_error: string | null; last_error_type: string | null;
   }[]>([]);
   const jobPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // История рассылок
+  interface BroadcastJobSummary {
+    id: number; platform: string; status: string; total_count: number;
+    sent_count: number; failed_count: number; ambiguous_count: number;
+    created_at: string | null; started_at: string | null; finished_at: string | null; error: string | null;
+  }
+  interface BroadcastJobItem {
+    id: number; group_id: string; group_name: string; status: string;
+    attempts: number; last_error: string | null; last_error_type: string | null; sent_at: string | null;
+  }
+  const [jobsHistory, setJobsHistory] = useState<BroadcastJobSummary[]>([]);
+  const [jobsHistoryLoading, setJobsHistoryLoading] = useState(false);
+  const [expandedJobId, setExpandedJobId] = useState<number | null>(null);
+  const [expandedJobItems, setExpandedJobItems] = useState<BroadcastJobItem[]>([]);
+  const [expandedJobItemsLoading, setExpandedJobItemsLoading] = useState(false);
   const [broadcastImagePreview, setBroadcastImagePreview] = useState<string | null>(null);
   const [broadcastImageUrl, setBroadcastImageUrl] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -208,15 +240,50 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
     loadGroups();
   }, [sessionId]);
 
-  // Восстанавливаем незавершённое фоновое задание рассылки при заходе/перезаходе на страницу
+  async function loadJobsHistory() {
+    setJobsHistoryLoading(true);
+    try {
+      const res = await fetch(`${BROADCAST_URL}?action=list_jobs`, { headers: apiHeaders });
+      const data = await res.json();
+      setJobsHistory(data.jobs || []);
+      return data.jobs || [];
+    } catch {
+      return [];
+    } finally {
+      setJobsHistoryLoading(false);
+    }
+  }
+
+  async function loadJobItems(jobId: number) {
+    setExpandedJobItemsLoading(true);
+    try {
+      const res = await fetch(`${BROADCAST_URL}?action=job_items&job_id=${jobId}`, { headers: apiHeaders });
+      const data = await res.json();
+      setExpandedJobItems(data.items || []);
+    } catch {
+      setExpandedJobItems([]);
+    } finally {
+      setExpandedJobItemsLoading(false);
+    }
+  }
+
+  function toggleJobDetails(jobId: number) {
+    if (expandedJobId === jobId) {
+      setExpandedJobId(null);
+      setExpandedJobItems([]);
+    } else {
+      setExpandedJobId(jobId);
+      loadJobItems(jobId);
+    }
+  }
+
+  // Восстанавливаем незавершённое фоновое задание рассылки при заходе/перезаходе на страницу,
+  // заодно загружаем историю прошлых рассылок
   useEffect(() => {
     (async () => {
-      try {
-        const res = await fetch(`${BROADCAST_URL}?action=list_jobs`, { headers: apiHeaders });
-        const data = await res.json();
-        const active = (data.jobs || []).find((j: { status: string }) => j.status === "queued" || j.status === "running");
-        if (active) setActiveJobId(active.id);
-      } catch { /* ignore */ }
+      const jobs = await loadJobsHistory();
+      const active = jobs.find((j: BroadcastJobSummary) => j.status === "queued" || j.status === "running");
+      if (active) setActiveJobId(active.id);
     })();
   }, [sessionId]);
 
@@ -240,6 +307,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
             setSendProgress(null);
             setActiveJobId(null);
             removeBroadcastImage();
+            loadJobsHistory();
           }
         }
       } catch { /* ignore */ }
@@ -713,6 +781,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
       const data = await res.json();
       if (data.job_id) {
         setActiveJobId(data.job_id);
+        loadJobsHistory();
       } else {
         setSending(false);
         setSendProgress(null);
@@ -1546,7 +1615,7 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                 {[
                   { label: "Активных групп", value: groups.filter((g) => g.active).length, icon: "Users", color: "text-blue-400" },
                   { label: "Контактов в базе", value: totalMembers, icon: "ContactRound", color: "text-violet-400" },
-                  { label: "Рассылок за месяц", value: 12, icon: "Send", color: "text-primary" },
+                  { label: "Рассылок за месяц", value: jobsHistory.filter((j) => { const d = j.created_at ? new Date(j.created_at) : null; const now = new Date(); return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).length, icon: "Send", color: "text-primary" },
                   { label: "Прочитано", value: "71%", icon: "CheckCheck", color: "text-amber-400" },
                 ].map((stat, i) => (
                   <div key={i} className="rounded-xl border border-border bg-card p-5 flex flex-col gap-2">
@@ -1566,32 +1635,38 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                     Все рассылки
                   </Button>
                 </div>
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border">
-                      {["Название", "Групп", "Отправлено", "Прочитано", "Дата", "Статус"].map((h) => (
-                        <th key={h} className="text-left text-xs text-muted-foreground font-medium px-6 py-3">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mockHistory.map((item, i) => (
-                      <tr key={item.id} className={`hover:bg-secondary/40 transition-colors ${i < mockHistory.length - 1 ? "border-b border-border/50" : ""}`}>
-                        <td className="px-6 py-3.5 text-sm text-foreground font-medium">{item.title}</td>
-                        <td className="px-6 py-3.5 text-sm text-muted-foreground">{item.groups}</td>
-                        <td className="px-6 py-3.5 text-sm text-foreground">{item.sent}</td>
-                        <td className="px-6 py-3.5 text-sm text-foreground">{item.read > 0 ? item.read : "—"}</td>
-                        <td className="px-6 py-3.5 text-xs text-muted-foreground">{item.date}</td>
-                        <td className="px-6 py-3.5">
-                          <span className={`text-xs px-2 py-1 rounded-full border font-medium
-                            ${item.status === "done" ? "bg-primary/10 text-primary border-primary/30" : "bg-amber-500/10 text-amber-400 border-amber-500/30"}`}>
-                            {item.status === "done" ? "Отправлено" : "Ожидание"}
-                          </span>
-                        </td>
+                {jobsHistoryLoading ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">Загрузка…</div>
+                ) : jobsHistory.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">Рассылок пока не было</div>
+                ) : (
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border">
+                        {["Платформа", "Групп", "Отправлено", "Ошибок", "Дата", "Статус"].map((h) => (
+                          <th key={h} className="text-left text-xs text-muted-foreground font-medium px-6 py-3">{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {jobsHistory.slice(0, 5).map((job, i) => (
+                        <tr key={job.id} className={`hover:bg-secondary/40 transition-colors cursor-pointer ${i < Math.min(jobsHistory.length, 5) - 1 ? "border-b border-border/50" : ""}`}
+                          onClick={() => setTab("broadcast")}>
+                          <td className="px-6 py-3.5 text-sm text-foreground font-medium capitalize">{job.platform}</td>
+                          <td className="px-6 py-3.5 text-sm text-muted-foreground">{job.total_count}</td>
+                          <td className="px-6 py-3.5 text-sm text-foreground">{job.sent_count}</td>
+                          <td className="px-6 py-3.5 text-sm text-foreground">{job.failed_count + job.ambiguous_count > 0 ? job.failed_count + job.ambiguous_count : "—"}</td>
+                          <td className="px-6 py-3.5 text-xs text-muted-foreground">{formatJobDate(job.created_at)}</td>
+                          <td className="px-6 py-3.5">
+                            <span className={`text-xs px-2 py-1 rounded-full border font-medium ${jobStatusLabels[job.status]?.cls || "bg-muted text-muted-foreground border-border"}`}>
+                              {jobStatusLabels[job.status]?.label || job.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -2079,6 +2154,66 @@ const Index = ({ sessionId, userEmail, onLogout }: IndexProps) => {
                   </div>
                 );
               })()}
+
+              {/* История рассылок */}
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                  <span className="text-sm font-semibold text-foreground">История рассылок</span>
+                  <button onClick={loadJobsHistory} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5">
+                    <Icon name="RefreshCw" size={12} className={jobsHistoryLoading ? "animate-spin" : ""} />
+                    Обновить
+                  </button>
+                </div>
+                {jobsHistoryLoading && jobsHistory.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">Загрузка…</div>
+                ) : jobsHistory.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">Рассылок пока не было</div>
+                ) : (
+                  <div className="divide-y divide-border/50">
+                    {jobsHistory.map((job) => (
+                      <div key={job.id}>
+                        <button onClick={() => toggleJobDetails(job.id)}
+                          className="w-full flex items-center gap-4 px-6 py-3.5 hover:bg-secondary/40 transition-colors text-left">
+                          <Icon name={expandedJobId === job.id ? "ChevronDown" : "ChevronRight"} size={14} className="text-muted-foreground shrink-0" />
+                          <span className="text-sm text-foreground font-medium capitalize w-24 shrink-0">{job.platform}</span>
+                          <span className="text-xs text-muted-foreground w-36 shrink-0">{formatJobDate(job.created_at)}</span>
+                          <span className="text-xs text-muted-foreground flex-1">
+                            Групп: <b className="text-foreground">{job.total_count}</b>
+                            {" · "}Отправлено: <b className="text-foreground">{job.sent_count}</b>
+                            {(job.failed_count + job.ambiguous_count) > 0 && (
+                              <span className="text-red-400"> · Ошибок: <b>{job.failed_count + job.ambiguous_count}</b></span>
+                            )}
+                          </span>
+                          <span className={`text-xs px-2 py-1 rounded-full border font-medium shrink-0 ${jobStatusLabels[job.status]?.cls || "bg-muted text-muted-foreground border-border"}`}>
+                            {jobStatusLabels[job.status]?.label || job.status}
+                          </span>
+                        </button>
+                        {expandedJobId === job.id && (
+                          <div className="px-6 pb-4 pl-14">
+                            {expandedJobItemsLoading ? (
+                              <div className="text-xs text-muted-foreground py-3">Загрузка групп…</div>
+                            ) : expandedJobItems.length === 0 ? (
+                              <div className="text-xs text-muted-foreground py-3">Нет данных по группам</div>
+                            ) : (
+                              <div className="space-y-1.5 pt-1">
+                                {expandedJobItems.map((it) => (
+                                  <div key={it.id} className="flex items-center gap-3 py-1.5 border-b border-border/30 last:border-0">
+                                    <span className="text-sm text-foreground flex-1 truncate">{it.group_name || it.group_id}</span>
+                                    {it.last_error && <span className="text-xs text-muted-foreground truncate max-w-[220px]">{it.last_error}</span>}
+                                    <span className={`text-[11px] px-2 py-0.5 rounded-full shrink-0 ${itemStatusLabels[it.status]?.cls || "bg-muted text-muted-foreground"}`}>
+                                      {itemStatusLabels[it.status]?.label || it.status}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

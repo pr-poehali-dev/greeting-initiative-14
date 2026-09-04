@@ -296,5 +296,28 @@ def handler(event: dict, context) -> dict:
             nudge_worker()
         return json_response({"ok": True})
 
+    if action == "job_items":
+        job_id = params.get("job_id")
+        if not job_id:
+            db.close()
+            return json_response({"error": "job_id обязателен"}, 400)
+        cur.execute(f"SELECT id FROM {SCHEMA}.broadcast_jobs WHERE id=%s AND user_id=%s", (job_id, user_id))
+        if not cur.fetchone():
+            db.close()
+            return json_response({"error": "Задание не найдено"}, 404)
+        cur.execute(f"""
+            SELECT id, group_id, group_name, status, attempts, last_error, last_error_type, sent_at
+            FROM {SCHEMA}.broadcast_job_items
+            WHERE job_id=%s
+            ORDER BY order_index ASC
+        """, (job_id,))
+        items = [{
+            "id": r[0], "group_id": r[1], "group_name": r[2], "status": r[3],
+            "attempts": r[4], "last_error": r[5], "last_error_type": r[6],
+            "sent_at": r[7].isoformat() if r[7] else None,
+        } for r in cur.fetchall()]
+        db.close()
+        return json_response({"items": items})
+
     db.close()
     return json_response({"error": "Unknown action"}, 400)
